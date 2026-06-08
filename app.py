@@ -607,7 +607,7 @@ with col2:
 
         st.session_state.uploader_key += 1
 
-        st.rerun()import streamlit as st
+        st.rerun()
 from pypdf import PdfReader, PdfWriter
 import pandas as pd
 import re
