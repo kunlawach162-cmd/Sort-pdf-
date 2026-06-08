@@ -5,12 +5,49 @@ import re
 import io
 import pandas as pd
 
-# ตั้งค่าหน้าตาของเว็บให้ดูโปรและ Scannable
-st.set_page_config(page_title="Smart Picking Sorter PRO", page_icon="📦", layout="wide")
+# ตั้งค่าหน้าตาของเว็บ (เริ่มแรกให้เป็นแบบยืดหยุ่นกว้าง)
+st.set_page_config(page_title="Smart Picking PRO", page_icon="📦", layout="wide")
+
+# ================= 🆕 ส่วนบนสุด: เลือกอุปกรณ์ที่กำลังใช้งาน =================
+st.sidebar.subheader("📱⚙️ ตั้งค่าขนาดหน้าจอ")
+device_mode = st.sidebar.radio(
+    "คุณกำลังเปิดใช้งานผ่านอุปกรณ์อะไร?",
+    ["คอมพิวเตอร์ (PC / Laptop) 💻", "โทรศัพท์มือถือ (Mobile) 📱"],
+    index=0
+)
+
+# ปรับสไตล์ CSS ตามอุปกรณ์ที่เลือก
+if device_mode == "โทรศัพท์มือถือ (Mobile) 📱":
+    st.markdown("""
+        <style>
+        .block-container { padding-top: 1rem; padding-bottom: 1rem; max-width: 100% !important; }
+        div[data-testid="stMetric"] {
+            background-color: #1e293b;
+            padding: 10px 14px;
+            border-radius: 10px;
+            margin-bottom: 6px;
+            border-left: 5px solid #3b82f6;
+        }
+        div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #94a3b8 !important; }
+        div[data-testid="stMetricValue"] { font-size: 20px !important; font-weight: bold !important; color: #f8fafc !important; }
+        </style>
+    """, unsafe_context=True)
+else:
+    st.markdown("""
+        <style>
+        div[data-testid="stMetric"] {
+            background-color: #0f172a;
+            padding: 20px;
+            border-radius: 12px;
+            border-top: 4px solid #3b82f6;
+        }
+        </style>
+    """, unsafe_context=True)
 
 # --- ฟังก์ชันแกะข้อมูลจาก PDF ---
 def extract_data_from_page(text):
     data = {
+        'zone': 'Unknown',
         'sku': 'ZZZZZZ',
         'qty': 1,
         'source': 'Unknown',
@@ -20,7 +57,17 @@ def extract_data_from_page(text):
     if not text:
         return data
         
-    # 1. หา ITEM CODE (เช่น 1-GDS-SHARP-000000565)
+    # 1. หา PICK-CODE / โซน
+    zone_match = re.search(r'\b(G\d+)\b', text)
+    if zone_match:
+        data['zone'] = zone_match.group(1)
+    else:
+        for line in text.split('\n'):
+            if line.strip().startswith('G0'):
+                data['zone'] = line.strip().split()[0]
+                break
+        
+    # 2. หา ITEM CODE
     sku_match = re.search(r'\b\d+-[A-Z]+-[A-Z]+-\d+\b', text)
     if sku_match:
         data['sku'] = sku_match.group(0)
@@ -32,32 +79,27 @@ def extract_data_from_page(text):
                     data['sku'] = m.group(1)
                     break
 
-    # 2. หาจำนวน QTY (อยู่แถวๆ บรรทัดที่มีรหัสสินค้า หรือมองหาตัวเลขรวม)
+    # 3. หาจำนวน QTY
     qty_match = re.search(r'รวมทั้งสิ้น\s*(\d+)', text)
     if qty_match:
         data['qty'] = int(qty_match.group(1))
 
-    # 3. หา Source (Shopee / Lazada)
+    # 4. หา Source (Shopee / Lazada)
     if "Shopee" in text:
         data['source'] = "Shopee 🟠"
     elif "Lada" in text or "Lazada" in text:
         data['source'] = "Lazada 🔵"
 
-    # 4. หา Order ID และ Tracking Number
+    # 5. หา Order ID
     order_match = re.search(r'Order ID\s*:\s*([\w-]+)', text, re.IGNORECASE)
     if order_match:
         data['order_id'] = order_match.group(1)
-        
-    track_match = re.search(r'Track No\s*:\s*([\w-]+)', text, re.IGNORECASE)
-    if track_match:
-        data['track_no'] = track_match.group(1)
 
     return data
 
 # --- ฟังก์ชันประมวลผลหลัก ---
-def process_pdf_pro(uploaded_file):
+def process_pdf_pro(uploaded_file, sort_mode):
     pages_data = []
-    
     with pdfplumber.open(uploaded_file) as pdf:
         for index, page in enumerate(pdf.pages):
             text = page.extract_text()
@@ -65,10 +107,11 @@ def process_pdf_pro(uploaded_file):
             page_info['page_index'] = index
             pages_data.append(page_info)
             
-    # เรียงลำดับตาม SKU จากน้อยไปมาก
-    pages_data.sort(key=lambda x: x['sku'])
+    if sort_mode == "🔤 เรียงตามรหัสสินค้า (ITEM CODE)":
+        pages_data.sort(key=lambda x: x['sku'])
+    elif sort_mode == "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)":
+        pages_data.sort(key=lambda x: (x['zone'], x['sku']))
     
-    # สร้าง PDF ใหม่
     reader = PdfReader(uploaded_file)
     writer = PdfWriter()
     for page_info in pages_data:
@@ -81,28 +124,40 @@ def process_pdf_pro(uploaded_file):
     return output_pdf, pages_data
 
 # --- ส่วนแสดงผลหน้าเว็บ (UI) ---
-st.title("📦 ระบบจัดเรียงใบจัดสินค้าเวอร์ชันคลังโปร (Smart Picking PRO)")
-st.caption("เวอร์ชันอัปเกรด: เรียงรหัสสินค้าอัตโนมัติ + สรุปยอดหยิบรวมเพื่อความรวดเร็วหน้างาน")
+st.title("📦 Smart Picking PRO")
+st.caption("ระบบจัดเรียงบิลอัจฉริยะ รองรับการแสดงผลทั้งบน PC และ มือถือ")
 st.markdown("---")
 
-uploaded_file = st.file_uploader("📂 ลากไฟล์ PDF ใบจัดสินค้ารวมมาวางที่นี่", type=["pdf"])
+# เลือกโหมดการเรียงลำดับ
+st.subheader("⚙️ เลือกรูปแบบการเรียงลำดับเอกสาร")
+sort_mode = st.radio(
+    "ต้องการให้ระบบเรียงลำดับหน้าบิลตามอะไร?",
+    [
+        "🔤 เรียงตามรหัสสินค้า (ITEM CODE)",
+        "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)"
+    ],
+    index=0
+)
+
+st.markdown("---")
+
+uploaded_file = st.file_uploader("📂 เลือกไฟล์ PDF ใบจัดสินค้า", type=["pdf"])
 
 if uploaded_file is not None:
-    st.success(f"🗂️ โหลดไฟล์ '{uploaded_file.name}' เรียบร้อย!")
+    st.info(f"🗂️ ไฟล์: {uploaded_file.name}")
     
-    if st.button("⚡ เริ่มประมวลผลและจัดเรียงเอกสาร", type="primary", use_container_width=True):
-        with st.spinner("🧠 ระบบกำลังอ่านข้อมูลแยกแยะรหัสสินค้าและสรุปออเดอร์..."):
+    if st.button("⚡ เริ่มจัดเรียงและสรุปยอดหยิบ", type="primary", use_container_width=True):
+        with st.spinner("⏳ กำลังคำนวณข้อมูล..."):
             try:
-                sorted_pdf, details = process_pdf_pro(uploaded_file)
+                sorted_pdf, details = process_pdf_pro(uploaded_file, sort_mode)
                 st.balloons()
                 
-                # สร้าง DataFrame เพื่อจัดการข้อมูลสถิติ
                 df = pd.DataFrame(details)
+                st.success("🎉 จัดเรียงสำเร็จ!")
                 
-                # ================= ส่วนดาวน์โหลดไฟล์ =================
-                st.success("🎉 จัดเรียงเสร็จเรียบร้อยแล้ว!")
+                # ปุ่มดาวน์โหลด
                 st.download_button(
-                    label="📥 ดาวน์โหลด PDF ที่จัดเรียงรหัสสินค้าแล้ว (พร้อมพิมพ์)",
+                    label="📥 ดาวน์โหลด PDF ที่จัดเรียงใหม่แล้ว",
                     data=sorted_pdf,
                     file_name=f"sorted_{uploaded_file.name}",
                     mime="application/pdf",
@@ -111,56 +166,283 @@ if uploaded_file is not None:
                 
                 st.markdown("---")
                 
-                # ================= ส่วนแดชบอร์ดสรุปงานคลัง =================
-                st.subheader("📊 สรุปภาพรวมใบงาน (Dashboard)")
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("จำนวนใบงานทั้งหมด", f"{len(df)} ใบ")
-                with col2:
-                    total_items = df['qty'].sum()
-                    st.metric("จำนวนสินค้าที่ต้องหยิบทวน", f"{total_items} ชิ้น")
-                with col3:
-                    shopee_count = len(df[df['source'] == "Shopee 🟠"])
-                    laz_count = len(df[df['source'] == "Lazada 🔵"])
-                    st.metric("แยกช่องทาง", f"Shopee: {shopee_count} | Laz: {laz_count}")
+                # ================= ส่วนแดชบอร์ดสรุปงานคลัง (ปรับตามประเภทอุปกรณ์) =================
+                st.subheader("📊 สรุปภาพรวม")
+                shopee_count = len(df[df['source'] == "Shopee 🟠"])
+                laz_count = len(df[df['source'] == "Lazada 🔵"])
+                
+                if device_mode == "โทรศัพท์มือถือ (Mobile) 📱":
+                    # แสดงผลแนวตั้งสำหรับมือถือ ไม่ให้ตกขอบ
+                    st.metric("📋 จำนวนใบงานทั้งหมด", f"{len(df)} ใบ")
+                    st.metric("🧺 สินค้าที่ต้องหยิบรวม", f"{df['qty'].sum()} ชิ้น")
+                    st.metric("🚚 แยกค่ายออเดอร์", f"Shopee: {shopee_count} | Lazada: {laz_count}")
+                else:
+                    # แสดงผลแนวนอน 3 คอลัมน์สวยๆ เต็มจอสำหรับ PC
+                    col1, col2, col3 = st.columns(3)
+                    with col1: st.metric("📋 จำนวนใบงานทั้งหมด", f"{len(df)} ใบ")
+                    with col2: st.metric("🧺 สินค้าที่ต้องหยิบรวม", f"{df['qty'].sum()} ชิ้น")
+                    with col3: st.metric("🚚 แยกค่ายออเดอร์", f"Shopee: {shopee_count} | Lazada: {laz_count}")
                 
                 st.markdown("---")
                 
-                # ================= ส่วนใบบิลรวมสินค้า (Picking List) =================
-                st.subheader("📝 ใบสรุปยอดหยิบรวม (Picking Summary)")
-                st.write("💡 แนะนำให้พนักงานดูตรงนี้แล้วไปหยิบของมากองรวมกันทีเดียวตามจำนวน ก่อนจะแยกแพ็กตามใบออเดอร์")
+                # ================= ส่วนใบบิลรวมสินค้า (Picking Summary) =================
+                st.subheader("📝 ยอดหยิบรวมสินค้า")
                 
-                # ยุบรวมจำนวนชิ้นตาม SKU
-                summary_df = df.groupby('sku')['qty'].sum().reset_index()
-                summary_df.columns = ['รหัสสินค้า (ITEM CODE)', 'จำนวนที่ต้องหยิบทั้งหมด (ชิ้น)']
-                summary_df = summary_df.sort_values(by='รหัสสินค้า (ITEM CODE)')
+                summary_df = df.groupby(['zone', 'sku'])['qty'].sum().reset_index()
+                summary_df.columns = ['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
                 
-                st.table(summary_df)
+                if sort_mode == "🔤 เรียงตามรหัสสินค้า (ITEM CODE)":
+                    summary_df = summary_df.sort_values(by='รหัสสินค้า (ITEM CODE)')
+                else:
+                    summary_df = summary_df.sort_values(by=['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)'])
+                    
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
                 
                 st.markdown("---")
                 
-                # ================= ส่วนตารางเช็กตำแหน่งหน้า =================
-                st.subheader("🔍 ตารางตรวจเช็กตำแหน่งออเดอร์")
-                st.write("พิมพ์ค้นหารหัสสินค้า หรือเลขที่คำสั่งซื้อ เพื่อดูว่าอยู่หน้าไหนในบิล PDF ใหม่")
+                # ================= ส่วนค้นหาออเดอร์ =================
+                st.subheader("🔍 ตรวจสอบตำแหน่งหน้าบิล")
                 
-                # ปรับแต่งการแสดงผลตารางให้เข้าใจง่าย
                 display_df = df.copy()
-                display_df['ลำดับหน้าใหม่'] = display_df.index + 1
-                display_df['หน้าเดิมในไฟล์เก่า'] = display_df['page_index'] + 1
-                display_df = display_df[['ลำดับหน้าใหม่', 'sku', 'qty', 'source', 'order_id', 'หน้าเดิมในไฟล์เก่า']]
-                display_df.columns = ['ลำดับหน้าใน PDF ใหม่', 'รหัสสินค้า (ITEM CODE)', 'จำนวน', 'ช่องทาง', 'Order ID', 'ตำแหน่งหน้าในไฟล์เดิม']
+                display_df['หน้าใหม่'] = display_df.index + 1
+                display_df['หน้าเดิม'] = display_df['page_index'] + 1
+                display_df = display_df[['หน้าใหม่', 'zone', 'sku', 'qty', 'order_id', 'หน้าเดิม']]
+                display_df.columns = ['บิลใบที่', 'โซน', 'รหัสสินค้า', 'จำนวน', 'Order ID', 'หน้าเดิมในไฟล์เก่า']
                 
-                # ช่องเซิร์ชข้อมูล
-                search_query = st.text_input("ค้นหาในตาราง (ใส่ ITEM CODE หรือ Order ID):")
+                search_query = st.text_input("พิมพ์รหัสสินค้า, โซน หรือ Order ID เพื่อค้นหาหน้า:")
                 if search_query:
                     filtered_df = display_df[
-                        display_df['รหัสสินค้า (ITEM CODE)'].str.contains(search_query, case=False, na=False) |
+                        display_df['รหัสสินค้า'].str.contains(search_query, case=False, na=False) |
+                        display_df['โซน'].str.contains(search_query, case=False, na=False) |
                         display_df['Order ID'].str.contains(search_query, case=False, na=False)
                     ]
-                    st.dataframe(filtered_df, use_container_width=True)
+                    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
                 else:
-                    st.dataframe(display_df, use_container_width=True)
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
                     
             except Exception as e:
-                st.error(f"เกิดข้อผิดพลาดในการประมวลผล: {e}")
+                st.error(f"เกิดข้อผิดพลาด: {e}")
+import streamlit as st
+import pdfplumber
+from pypdf import PdfReader, PdfWriter
+import re
+import io
+import pandas as pd
 
+# ตั้งค่าหน้าตาของเว็บ (เริ่มแรกให้เป็นแบบยืดหยุ่นกว้าง)
+st.set_page_config(page_title="Smart Picking PRO", page_icon="📦", layout="wide")
+
+# ================= 🆕 ส่วนบนสุด: เลือกอุปกรณ์ที่กำลังใช้งาน =================
+st.sidebar.subheader("📱⚙️ ตั้งค่าขนาดหน้าจอ")
+device_mode = st.sidebar.radio(
+    "คุณกำลังเปิดใช้งานผ่านอุปกรณ์อะไร?",
+    ["คอมพิวเตอร์ (PC / Laptop) 💻", "โทรศัพท์มือถือ (Mobile) 📱"],
+    index=0
+)
+
+# ปรับสไตล์ CSS ตามอุปกรณ์ที่เลือก
+if device_mode == "โทรศัพท์มือถือ (Mobile) 📱":
+    st.markdown("""
+        <style>
+        .block-container { padding-top: 1rem; padding-bottom: 1rem; max-width: 100% !important; }
+        div[data-testid="stMetric"] {
+            background-color: #1e293b;
+            padding: 10px 14px;
+            border-radius: 10px;
+            margin-bottom: 6px;
+            border-left: 5px solid #3b82f6;
+        }
+        div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #94a3b8 !important; }
+        div[data-testid="stMetricValue"] { font-size: 20px !important; font-weight: bold !important; color: #f8fafc !important; }
+        </style>
+    """, unsafe_context=True)
+else:
+    st.markdown("""
+        <style>
+        div[data-testid="stMetric"] {
+            background-color: #0f172a;
+            padding: 20px;
+            border-radius: 12px;
+            border-top: 4px solid #3b82f6;
+        }
+        </style>
+    """, unsafe_context=True)
+
+# --- ฟังก์ชันแกะข้อมูลจาก PDF ---
+def extract_data_from_page(text):
+    data = {
+        'zone': 'Unknown',
+        'sku': 'ZZZZZZ',
+        'qty': 1,
+        'source': 'Unknown',
+        'track_no': 'Unknown',
+        'order_id': 'Unknown'
+    }
+    if not text:
+        return data
+        
+    # 1. หา PICK-CODE / โซน
+    zone_match = re.search(r'\b(G\d+)\b', text)
+    if zone_match:
+        data['zone'] = zone_match.group(1)
+    else:
+        for line in text.split('\n'):
+            if line.strip().startswith('G0'):
+                data['zone'] = line.strip().split()[0]
+                break
+        
+    # 2. หา ITEM CODE
+    sku_match = re.search(r'\b\d+-[A-Z]+-[A-Z]+-\d+\b', text)
+    if sku_match:
+        data['sku'] = sku_match.group(0)
+    else:
+        for line in text.split('\n'):
+            if "1-GDS-" in line:
+                m = re.search(r'(1-GDS-[\w-]+)', line)
+                if m:
+                    data['sku'] = m.group(1)
+                    break
+
+    # 3. หาจำนวน QTY
+    qty_match = re.search(r'รวมทั้งสิ้น\s*(\d+)', text)
+    if qty_match:
+        data['qty'] = int(qty_match.group(1))
+
+    # 4. หา Source (Shopee / Lazada)
+    if "Shopee" in text:
+        data['source'] = "Shopee 🟠"
+    elif "Lada" in text or "Lazada" in text:
+        data['source'] = "Lazada 🔵"
+
+    # 5. หา Order ID
+    order_match = re.search(r'Order ID\s*:\s*([\w-]+)', text, re.IGNORECASE)
+    if order_match:
+        data['order_id'] = order_match.group(1)
+
+    return data
+
+# --- ฟังก์ชันประมวลผลหลัก ---
+def process_pdf_pro(uploaded_file, sort_mode):
+    pages_data = []
+    with pdfplumber.open(uploaded_file) as pdf:
+        for index, page in enumerate(pdf.pages):
+            text = page.extract_text()
+            page_info = extract_data_from_page(text)
+            page_info['page_index'] = index
+            pages_data.append(page_info)
+            
+    if sort_mode == "🔤 เรียงตามรหัสสินค้า (ITEM CODE)":
+        pages_data.sort(key=lambda x: x['sku'])
+    elif sort_mode == "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)":
+        pages_data.sort(key=lambda x: (x['zone'], x['sku']))
+    
+    reader = PdfReader(uploaded_file)
+    writer = PdfWriter()
+    for page_info in pages_data:
+        writer.add_page(reader.pages[page_info['page_index']])
+        
+    output_pdf = io.BytesIO()
+    writer.write(output_pdf)
+    output_pdf.seek(0)
+    
+    return output_pdf, pages_data
+
+# --- ส่วนแสดงผลหน้าเว็บ (UI) ---
+st.title("📦 Smart Picking PRO")
+st.caption("ระบบจัดเรียงบิลอัจฉริยะ รองรับการแสดงผลทั้งบน PC และ มือถือ")
+st.markdown("---")
+
+# เลือกโหมดการเรียงลำดับ
+st.subheader("⚙️ เลือกรูปแบบการเรียงลำดับเอกสาร")
+sort_mode = st.radio(
+    "ต้องการให้ระบบเรียงลำดับหน้าบิลตามอะไร?",
+    [
+        "🔤 เรียงตามรหัสสินค้า (ITEM CODE)",
+        "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)"
+    ],
+    index=0
+)
+
+st.markdown("---")
+
+uploaded_file = st.file_uploader("📂 เลือกไฟล์ PDF ใบจัดสินค้า", type=["pdf"])
+
+if uploaded_file is not None:
+    st.info(f"🗂️ ไฟล์: {uploaded_file.name}")
+    
+    if st.button("⚡ เริ่มจัดเรียงและสรุปยอดหยิบ", type="primary", use_container_width=True):
+        with st.spinner("⏳ กำลังคำนวณข้อมูล..."):
+            try:
+                sorted_pdf, details = process_pdf_pro(uploaded_file, sort_mode)
+                st.balloons()
+                
+                df = pd.DataFrame(details)
+                st.success("🎉 จัดเรียงสำเร็จ!")
+                
+                # ปุ่มดาวน์โหลด
+                st.download_button(
+                    label="📥 ดาวน์โหลด PDF ที่จัดเรียงใหม่แล้ว",
+                    data=sorted_pdf,
+                    file_name=f"sorted_{uploaded_file.name}",
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+                
+                st.markdown("---")
+                
+                # ================= ส่วนแดชบอร์ดสรุปงานคลัง (ปรับตามประเภทอุปกรณ์) =================
+                st.subheader("📊 สรุปภาพรวม")
+                shopee_count = len(df[df['source'] == "Shopee 🟠"])
+                laz_count = len(df[df['source'] == "Lazada 🔵"])
+                
+                if device_mode == "โทรศัพท์มือถือ (Mobile) 📱":
+                    # แสดงผลแนวตั้งสำหรับมือถือ ไม่ให้ตกขอบ
+                    st.metric("📋 จำนวนใบงานทั้งหมด", f"{len(df)} ใบ")
+                    st.metric("🧺 สินค้าที่ต้องหยิบรวม", f"{df['qty'].sum()} ชิ้น")
+                    st.metric("🚚 แยกค่ายออเดอร์", f"Shopee: {shopee_count} | Lazada: {laz_count}")
+                else:
+                    # แสดงผลแนวนอน 3 คอลัมน์สวยๆ เต็มจอสำหรับ PC
+                    col1, col2, col3 = st.columns(3)
+                    with col1: st.metric("📋 จำนวนใบงานทั้งหมด", f"{len(df)} ใบ")
+                    with col2: st.metric("🧺 สินค้าที่ต้องหยิบรวม", f"{df['qty'].sum()} ชิ้น")
+                    with col3: st.metric("🚚 แยกค่ายออเดอร์", f"Shopee: {shopee_count} | Lazada: {laz_count}")
+                
+                st.markdown("---")
+                
+                # ================= ส่วนใบบิลรวมสินค้า (Picking Summary) =================
+                st.subheader("📝 ยอดหยิบรวมสินค้า")
+                
+                summary_df = df.groupby(['zone', 'sku'])['qty'].sum().reset_index()
+                summary_df.columns = ['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
+                
+                if sort_mode == "🔤 เรียงตามรหัสสินค้า (ITEM CODE)":
+                    summary_df = summary_df.sort_values(by='รหัสสินค้า (ITEM CODE)')
+                else:
+                    summary_df = summary_df.sort_values(by=['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)'])
+                    
+                st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                
+                st.markdown("---")
+                
+                # ================= ส่วนค้นหาออเดอร์ =================
+                st.subheader("🔍 ตรวจสอบตำแหน่งหน้าบิล")
+                
+                display_df = df.copy()
+                display_df['หน้าใหม่'] = display_df.index + 1
+                display_df['หน้าเดิม'] = display_df['page_index'] + 1
+                display_df = display_df[['หน้าใหม่', 'zone', 'sku', 'qty', 'order_id', 'หน้าเดิม']]
+                display_df.columns = ['บิลใบที่', 'โซน', 'รหัสสินค้า', 'จำนวน', 'Order ID', 'หน้าเดิมในไฟล์เก่า']
+                
+                search_query = st.text_input("พิมพ์รหัสสินค้า, โซน หรือ Order ID เพื่อค้นหาหน้า:")
+                if search_query:
+                    filtered_df = display_df[
+                        display_df['รหัสสินค้า'].str.contains(search_query, case=False, na=False) |
+                        display_df['โซน'].str.contains(search_query, case=False, na=False) |
+                        display_df['Order ID'].str.contains(search_query, case=False, na=False)
+                    ]
+                    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+                else:
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                    
+            except Exception as e:
+                st.error(f"เกิดข้อผิดพลาด: {e}")
