@@ -7,7 +7,7 @@ import pandas as pd
 # 1. ตั้งค่าหน้าเว็บให้คลีนและกว้างเต็มจอ
 st.set_page_config(page_title="Sharp Bill Sorter", page_icon="📦", layout="wide")
 
-# ================= 🎨 CSS เนรมิตดีไซน์แบนเนอร์แบบเดียวกับรูปภาพของคุณ (แก้ไขไม่ให้โค้ดดิบโผล่) =================
+# ================= 🎨 CSS ปรับแต่งดีไซน์แบนเนอร์พนักงานคลังสินค้ามินิมอล =================
 st.markdown("""
     <style>
     /* ตั้งค่าฟอนต์และพื้นหลังหลักให้เป็นโทนคลีน-โมเดิร์น */
@@ -61,7 +61,7 @@ st.markdown("""
     }
     
     .hero-img {
-        max-width: 320px;
+        max-width: 260px;
         width: 100%;
         height: auto;
         border-radius: 12px;
@@ -123,7 +123,7 @@ st.markdown("""
             width: 100%;
         }
         .hero-img {
-            max-width: 240px;
+            max-width: 200px;
         }
         div[data-testid="stMetric"] { margin-bottom: 8px !important; width: 100% !important; }
         div[data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; }
@@ -205,7 +205,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
 # ================= 🚀 หน้าการแสดงผลเว็บไซต์ (UI Layout) =================
 
-# แสดงส่วนหัวแบนเนอร์สวยๆ และดึงภาพกราฟิกการ์ตูนคลังสินค้า 3D ของจริงมาแสดงฝั่งขวา
+# ฝังรูปภาพพนักงานยกกล่องมินิมอลที่คุณเลือกไว้ที่ฝั่งขวาของแบนเนอร์เรียบร้อย
 st.markdown("""
     <div class="hero-banner">
         <div class="hero-left">
@@ -218,7 +218,7 @@ st.markdown("""
             </p>
         </div>
         <div class="hero-right">
-            <img class="hero-img" src="https://img.freepik.com/free-vector/isometric-warehouse-horizontal-illustration_1284-57223.jpg" alt="Warehouse 3D">
+            <img class="hero-img" src="https://i.ibb.co/6R0gGf9M/1000004375.jpg" alt="Sharp Warehouse Worker">
         </div>
     </div>
 """, unsafe_allow_html=True)
