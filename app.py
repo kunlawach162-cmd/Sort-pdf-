@@ -7,7 +7,7 @@ import pandas as pd
 # 1. ตั้งค่าหน้าเว็บให้คลีนและกว้างเต็มจอ
 st.set_page_config(page_title="Sharp Bill Sorter", page_icon="📦", layout="wide")
 
-# ================= 🎨 CSS ขั้นเทพ: เนรมิตดีไซน์แบนเนอร์แบบเดียวกับรูปภาพของคุณ =================
+# ================= 🎨 CSS เนรมิตดีไซน์แบนเนอร์แบบเดียวกับรูปภาพของคุณ (แก้ไขไม่ให้โค้ดดิบโผล่) =================
 st.markdown("""
     <style>
     /* ตั้งค่าฟอนต์และพื้นหลังหลักให้เป็นโทนคลีน-โมเดิร์น */
@@ -16,7 +16,7 @@ st.markdown("""
         color: #1e293b;
     }
     
-    /* โครงสร้างแบนเนอร์ Sharp Bill Sorter สไตล์แบบรูปภาพ */
+    /* โครงสร้างแบนเนอร์ Sharp Bill Sorter */
     .hero-banner {
         background-color: #f4efe6;
         border-radius: 20px;
@@ -35,12 +35,11 @@ st.markdown("""
     }
     
     .hero-title {
-        font-size: 4.2rem;
+        font-size: 3.8rem;
         font-weight: 900;
         line-height: 1.1;
         color: #1a1a1a;
         margin: 0 0 15px 0;
-        font-family: 'Inter', 'Prompt', sans-serif;
     }
     
     .hero-title span {
@@ -51,23 +50,7 @@ st.markdown("""
         font-size: 1.2rem;
         color: #4a4a4a;
         line-height: 1.6;
-        margin-bottom: 25px;
-        font-family: 'Prompt', sans-serif;
-    }
-    
-    .hero-links {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-        margin-bottom: 10px;
-    }
-    
-    .hero-link-item {
-        font-size: 0.95rem;
-        color: #1b4d8f;
-        text-decoration: underline;
-        font-weight: 500;
-        cursor: pointer;
+        margin-bottom: 5px;
     }
     
     .hero-right {
@@ -75,6 +58,13 @@ st.markdown("""
         display: flex;
         justify-content: flex-end;
         align-items: center;
+    }
+    
+    .hero-img {
+        max-width: 320px;
+        width: 100%;
+        height: auto;
+        border-radius: 12px;
     }
     
     /* ตกแต่งตารางสรุปแบบแดชบอร์ด */
@@ -88,7 +78,7 @@ st.markdown("""
     div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #64748b !important; font-weight: bold !important; }
     div[data-testid="stMetricValue"] { font-size: 24px !important; font-weight: bold !important; color: #1e293b !important; }
     
-    /* ตกแต่งปุ่มดำเนินการ */
+    /* ตกแต่งปุ่มดำเนินการสีเขียว */
     div.stButton > button:first-child {
         background-color: #10b981 !important;
         color: white !important;
@@ -103,7 +93,7 @@ st.markdown("""
         background-color: #059669 !important;
     }
     
-    /* ปรับปรุงขนาดและสีของกล่อง File Uploader */
+    /* ปรับแต่งกล่อง File Uploader */
     div[data-testid="stFileUploader"] {
         background-color: #ffffff;
         border: 2px dashed #e5dec9;
@@ -111,19 +101,19 @@ st.markdown("""
         padding: 20px;
     }
     
-    /* 📱 บังคับให้รองรับมือถือแบบ Responsive สมบูรณ์แบบ */
+    /* 📱 รองรับมือถือแบบ Responsive */
     @media (max-width: 768px) {
         .hero-banner {
             flex-direction: column-reverse;
             padding: 24px;
             gap: 20px;
+            text-align: center;
         }
         .hero-left {
             padding-right: 0;
-            text-align: center;
         }
         .hero-title {
-            font-size: 2.6rem;
+            font-size: 2.5rem;
         }
         .hero-subtitle {
             font-size: 1rem;
@@ -132,8 +122,8 @@ st.markdown("""
             justify-content: center;
             width: 100%;
         }
-        .hero-links {
-            align-items: center;
+        .hero-img {
+            max-width: 240px;
         }
         div[data-testid="stMetric"] { margin-bottom: 8px !important; width: 100% !important; }
         div[data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; }
@@ -141,7 +131,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- ฟังก์ชันหลักในการแกะและคัดแยกข้อมูลใบงาน ---
+# --- ฟังก์ชันเบื้องหลังดึงข้อมูล (Core Logic) ---
 def detect_courier(track_no, source):
     if not track_no or track_no == "Unknown": return source
     t = track_no.upper()
@@ -215,7 +205,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
 # ================= 🚀 หน้าการแสดงผลเว็บไซต์ (UI Layout) =================
 
-# เรนเดอร์แบนเนอร์ที่มีดีไซน์เดียวกับรูปภาพของคุณด้วย HTML + เวกเตอร์ชั้นวางพัสดุ (SVG 3D)
+# แสดงส่วนหัวแบนเนอร์สวยๆ และดึงภาพกราฟิกการ์ตูนคลังสินค้า 3D ของจริงมาแสดงฝั่งขวา
 st.markdown("""
     <div class="hero-banner">
         <div class="hero-left">
@@ -226,70 +216,14 @@ st.markdown("""
             <p class="hero-subtitle">
                 ระบบจัดเรียงบิล เลือกโหมดการคัดจัดเรียงบิลหน้างานได้ตามต้องการ
             </p>
-            <div class="hero-links">
-                <span class="hero-link-item">www.reallygreatsite.com</span>
-                <span class="hero-link-item">www.reallygreatsite.com</span>
-                <span class="hero-link-item">www.reallygreatsite.com</span>
-            </div>
         </div>
         <div class="hero-right">
-            <!-- ภาพเวกเตอร์ 3D Isometric ชั้นวางคลังสินค้าและกล่องพัสดุ ตรงตามรูปเป๊ะๆ -->
-            <svg width="340" height="280" viewBox="0 0 340 280" fill="none" xmlns="http://www.w3.org/2000/svg" style="max-width: 100%; height: auto;">
-                <!-- โครงสร้างชั้นเหล็กสีน้ำเงิน -->
-                <!-- เสาหลัง -->
-                <path d="M190 20 L200 20 L200 230 L190 230 Z" fill="#1b4d8f" />
-                <path d="M290 80 L300 80 L300 250 L290 250 Z" fill="#1b4d8f" />
-                <!-- เสาหน้า -->
-                <path d="M90 120 L100 120 L100 270 L90 270 Z" fill="#2563eb" />
-                <path d="M190 150 L200 150 L200 270 L190 270 Z" fill="#2563eb" />
-                
-                <!-- คานเหล็กชั้นกลาง -->
-                <path d="M95 180 L295 110 L295 116 L95 186 Z" fill="#3b82f6" />
-                <path d="M95 180 L195 210 L195 216 L95 186 Z" fill="#1d4ed8" />
-                
-                <!-- คานเหล็กชั้นล่างสุด -->
-                <path d="M95 250 L295 180 L295 186 L95 256 Z" fill="#3b82f6" />
-                <path d="M95 250 L195 270 L195 276 L95 256 Z" fill="#1d4ed8" />
-                
-                <!-- ตะแกรงชั้นกลาง -->
-                <polygon points="95,180 195,150 295,110 195,150" fill="#94a3b8" opacity="0.3" />
-                
-                <!-- กล่องพัสดุ 3D ชั้นล่าง -->
-                <g transform="translate(140, 185)">
-                    <!-- ด้านบนกล่อง -->
-                    <polygon points="0,-15 35,-30 70,-15 35,0" fill="#f5c285" />
-                    <!-- ด้านข้างซ้าย (เงา) -->
-                    <polygon points="0,-15 35,0 35,35 0,20" fill="#cc9652" />
-                    <!-- ด้านข้างขวา -->
-                    <polygon points="35,0 70,-15 70,20 35,35" fill="#e5ab65" />
-                    <!-- สัญลักษณ์ไอคอนกล่อง -->
-                    <path d="M12,12 L22,17 M12,17 L22,12" stroke="#4a321a" stroke-width="2" />
-                </g>
-                
-                <!-- กล่องพัสดุ 3D ชั้นกลาง -->
-                <g transform="translate(125, 105)">
-                    <!-- ด้านบนกล่อง -->
-                    <polygon points="0,-20 45,-38 90,-20 45,2" fill="#e5ab65" />
-                    <!-- ด้านข้างซ้าย (เงา) -->
-                    <polygon points="0,-20 45,2 45,45 0,23" fill="#b07d40" />
-                    <!-- ด้านข้างขวา -->
-                    <polygon points="45,2 90,-20 90,23 45,45" fill="#cc9652" />
-                    <!-- โลโก้รอยเทปกาว -->
-                    <polygon points="40,-15 50,-11 50,22 40,18" fill="#4a321a" opacity="0.4" />
-                </g>
-                
-                <!-- กล่องพัสดุ 3D ใบเฉียงยาว ด้านหลัง -->
-                <g transform="translate(180, 50)">
-                    <polygon points="0,-10 50,-25 90,-10 40,5" fill="#f5c285" />
-                    <polygon points="0,-10 40,5 40,55 0,40" fill="#cc9652" />
-                    <polygon points="40,5 90,-10 90,40 40,55" fill="#e5ab65" />
-                </g>
-            </svg>
+            <img class="hero-img" src="https://img.freepik.com/free-vector/isometric-warehouse-horizontal-illustration_1284-57223.jpg" alt="Warehouse 3D">
         </div>
     </div>
 """, unsafe_allow_html=True)
 
-# ส่วนการใช้งานหลักด้านล่างแบนเนอร์
+# ส่วนช่องกรอกและปุ่มทำงานหลัก
 st.subheader("⚙️ ขั้นตอนที่ 1: เลือกโหมดการคัดแยกเอกสาร")
 sort_mode = st.radio(
     "ระบบจะเรียงบิลตามเงื่อนไขที่คุณเลือกทันที:",
@@ -305,7 +239,6 @@ sort_mode = st.radio(
 st.markdown("---")
 
 st.subheader("📂 ขั้นตอนที่ 2: อัปโหลดไฟล์บิลใบจัดสินค้า (PDF)")
-# ระบบอัปโหลดได้หลายไฟล์พร้อมกันเพื่อทะลุขีดจำกัด 10,000 หน้า
 uploaded_files = st.file_uploader(
     "ลากไฟล์ PDF มาวางตรงนี้ (สามารถลากวางพร้อมกันหลายๆ ไฟล์เพื่อรวมยอดรอบเดียวกันได้)", 
     type=["pdf"], 
@@ -324,7 +257,6 @@ if uploaded_files:
                 df = pd.DataFrame(details)
                 st.success("🎉 ทำรายการสำเร็จเรียบร้อย!")
                 
-                # ปุ่มดาวน์โหลดไฟล์สีเขียวสด
                 st.download_button(
                     label="📥 ดาวน์โหลดไฟล์บิล PDF ที่มัดรวมและจัดเรียงใหม่ทั้งหมด",
                     data=sorted_pdf,
@@ -335,7 +267,7 @@ if uploaded_files:
                 
                 st.markdown("---")
                 
-                # ================= แดชบอร์ดสรุปยอดประจำรอบ =================
+                # ================= แดชบอร์ดสรุปยอด =================
                 st.subheader("📊 ขั้นตอนที่ 3: สรุปยอดรวมสินค้าจากทุกไฟล์")
                 shopee_count = len(df[df['source'] == "Shopee 🟠"])
                 laz_count = len(df[df['source'] == "Lazada 🔵"])
@@ -366,7 +298,7 @@ if uploaded_files:
                 
                 st.markdown("---")
                 
-                # ================= ช่องค้นหาตำแหน่งใบงานด่วน =================
+                # ================= ช่องค้นหาตำแหน่งหน้าบิล =================
                 st.write("**🔍 ค้นหาออเดอร์ด่วนและตรวจสอบหน้าเอกสาร**")
                 display_df = df.copy()
                 display_df['หน้าใหม่'] = display_df.index + 1
