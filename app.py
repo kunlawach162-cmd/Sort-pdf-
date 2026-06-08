@@ -28,7 +28,6 @@ st.markdown("""
     div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #64748b !important; font-weight: bold !important; }
     div[data-testid="stMetricValue"] { font-size: 24px !important; font-weight: bold !important; color: #1e293b !important; }
     
-    /* บังคับปุ่ม Primary ให้เป็นสีเขียวสดใส */
     button[kind="primary"] {
         background-color: #10b981 !important;
         border-color: #10b981 !important;
@@ -71,48 +70,47 @@ def extract_data_from_page(text):
     data = {'zone': 'Unknown', 'sku': 'ZZZZZZ', 'qty': 1, 'source': 'Unknown', 'track_no': 'Unknown', 'courier': 'Unknown', 'order_id': 'Unknown'}
     if not text: return data
     
-    # 🌟 [อัปเกรด] แปลงข้อความทั้งหมดในหน้าให้เป็นบรรทัดเดียว (ลบการเว้นบรรทัดออก) 
-    # เพื่อแก้ปัญหาคำว่า "รวมทั้งสิ้น" อยู่คนละบรรทัดกับตัวเลข
-    clean_text = re.sub(r'\s+', ' ', text)
-    
     # 1. ดึง Track No
-    track_match = re.search(r'Track\s*No\s*:\s*([\w-]+)', clean_text, re.IGNORECASE)
+    track_match = re.search(r'Track\s*No\s*:\s*([\w-]+)', text, re.IGNORECASE)
     if track_match: data['track_no'] = track_match.group(1).strip()
     
     # 2. ดึง Platform
-    if "Shopee" in clean_text: data['source'] = "Shopee 🟠"
-    elif "Lada" in clean_text or "Lazada" in clean_text: data['source'] = "Lazada 🔵"
+    if "Shopee" in text: data['source'] = "Shopee 🟠"
+    elif "Lada" in text or "Lazada" in text: data['source'] = "Lazada 🔵"
     
     data['courier'] = detect_courier(data['track_no'], data['source'])
     
-    # 3. ดึง Zone (หาตัวแรกที่เจอ)
-    zone_matches = re.findall(r'\b(G\d+)\b', clean_text)
-    if zone_matches: data['zone'] = zone_matches[0]
+    # 3. ดึง Zone
+    zone_match = re.search(r'\b(G\d+)\b', text)
+    if zone_match: data['zone'] = zone_match.group(1)
     
-    # 4. ดึง Order ID
-    order_match = re.search(r'Order ID\s*:\s*([\w-]+)', clean_text, re.IGNORECASE)
-    if order_match: data['order_id'] = order_match.group(1)
-
-    # 🌟 5. ดึง SKU (ดักจับกรณี 1 ใบมีหลายรหัสสินค้า)
-    # ค้นหาทุกรหัสในหน้านั้น แล้วเลือกเอาเฉพาะ "ตัวแรกสุด [0]" ตามที่กำหนด
-    sku_matches = re.findall(r'(1-GDS-[\w-]+)', clean_text)
-    if sku_matches:
-        data['sku'] = sku_matches[0]
+    # 4. ดึง SKU (คืนค่ากลับไปใช้รูปแบบของเวอร์ชัน 1 ที่แม่นยำที่สุด หาตัวแรกสุดที่เจอ)
+    sku_match = re.search(r'\b\d+-[A-Z]+-[A-Z]+-\d+\b', text)
+    if sku_match: 
+        data['sku'] = sku_match.group(0)
     else:
-        sku_alt_matches = re.findall(r'\b\d+-[A-Z]+-[A-Z]+-\d+\b', clean_text)
-        if sku_alt_matches:
-            data['sku'] = sku_alt_matches[0]
-
-    # 🌟 6. ดึงยอดชิ้นจากคำว่า "รวมทั้งสิ้น" เป็นหลัก
-    qty_match = re.search(r'รวมทั้งสิ้น\s*(\d+)', clean_text)
-    if qty_match:
+        for line in text.split('\n'):
+            if "1-GDS-" in line:
+                m = re.search(r'(1-GDS-[\w-]+)', line)
+                if m: 
+                    data['sku'] = m.group(1)
+                    break
+                
+    # 5. ดึงยอดชิ้น (รีดบรรทัดให้เป็นเส้นตรง เพื่อแก้ปัญหาคำว่า "รวมทั้งสิ้น" โดนตัดบรรทัด)
+    clean_text_for_qty = text.replace('\n', ' ').replace('\r', ' ')
+    qty_match = re.search(r'รวมทั้งสิ้น\s*(\d+)', clean_text_for_qty)
+    if qty_match: 
         data['qty'] = int(qty_match.group(1))
     else:
-        # คำค้นหาสำรอง เผื่อบางใบไม่มีคำว่ารวมทั้งสิ้น
-        qty_fallback = re.search(r'(?:จำนวน|Qty|Quantity)\s*[:=]?\s*(\d+)', clean_text, re.IGNORECASE)
+        # คำค้นหาสำรอง เผื่อบางใบใช้คำอื่น
+        qty_fallback = re.search(r'(?:จำนวน|Qty|Quantity)\s*[:=]?\s*(\d+)', clean_text_for_qty, re.IGNORECASE)
         if qty_fallback:
             data['qty'] = int(qty_fallback.group(1))
-
+            
+    # 6. ดึง Order ID
+    order_match = re.search(r'Order ID\s*:\s*([\w-]+)', text, re.IGNORECASE)
+    if order_match: data['order_id'] = order_match.group(1)
+    
     return data
 
 def process_multiple_pdfs(uploaded_files, sort_mode):
@@ -225,6 +223,7 @@ if uploaded_files:
                 if sort_mode == "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)":
                     summary_df = df.groupby(['courier', 'sku'])['qty'].sum().reset_index()
                     summary_df.columns = ['บริษัทขนส่ง', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
+                    summary_df = summary_df.sort_values(by=['บริษัทขนส่ง', 'รหัสสินค้า (ITEM CODE)'])
                 else:
                     summary_df = df.groupby('sku')['qty'].sum().reset_index()
                     summary_df.columns = ['รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
