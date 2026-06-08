@@ -1,3 +1,4 @@
+```python
 import streamlit as st
 from pypdf import PdfReader, PdfWriter
 import re
@@ -7,13 +8,20 @@ import pandas as pd
 # 1. ตั้งค่าหน้าเว็บให้คลีนและกว้างเต็มจอ
 st.set_page_config(page_title="Sharp Bill Sorter", page_icon="📦", layout="wide")
 
+# ================= 🚀 ระบบจัดการ Session State (สำหรับปุ่ม Reset) =================
+# สร้างตัวแปร key สำหรับกล่องอัปโหลด เพื่อให้เราสั่งรีเซ็ตล้างไฟล์เก่าได้ทันที
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+
 # ================= 🎨 CSS ปรับแต่งดีไซน์ =================
 st.markdown("""
     <style>
+    /* พื้นหลังและฟอนต์ */
     html, body, [data-testid="stAppViewContainer"] {
         background-color: #faf9f6 !important;
         color: #1e293b;
     }
+    /* กล่องสถิติยอดสรุป */
     div[data-testid="stMetric"] {
         background-color: #ffffff;
         padding: 16px 20px;
@@ -24,20 +32,31 @@ st.markdown("""
     div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #64748b !important; font-weight: bold !important; }
     div[data-testid="stMetricValue"] { font-size: 24px !important; font-weight: bold !important; color: #1e293b !important; }
     
-    div.stButton > button:first-child {
+    /* ตกแต่งปุ่มหลัก (Primary Button) ให้เป็นสีเขียวสดใส */
+    button[data-testid="baseButton-primary"] {
         background-color: #10b981 !important;
+        border-color: #10b981 !important;
         color: white !important;
         font-size: 16px !important;
         font-weight: bold !important;
         border-radius: 8px !important;
-        border: none !important;
         padding: 0.75rem 2.5rem !important;
         box-shadow: 0 4px 10px rgba(16, 185, 129, 0.2);
     }
-    div.stButton > button:first-child:hover {
+    button[data-testid="baseButton-primary"]:hover {
         background-color: #059669 !important;
+        border-color: #059669 !important;
     }
     
+    /* ตกแต่งปุ่มรอง (Secondary Button) สำหรับปุ่มล้างข้อมูล */
+    button[data-testid="baseButton-secondary"] {
+        font-size: 15px !important;
+        font-weight: bold !important;
+        border-radius: 8px !important;
+        border: 1px solid #cbd5e1 !important;
+    }
+    
+    /* กล่องอัปโหลดไฟล์ */
     div[data-testid="stFileUploader"] {
         background-color: #ffffff;
         border: 2px dashed #e5dec9;
@@ -108,12 +127,11 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
             page_info['reader_page_ref'] = page
             all_pages_data.append(page_info)
             
+    # เหลือ 2 โหมดการเรียงลำดับตามที่คุณกุลวัชรต้องการ
     if sort_mode == "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)":
         all_pages_data.sort(key=lambda x: (x['courier'], x['sku']))
-    elif sort_mode == "🔤 เรียงตามรหัสสินค้าอย่างเดียว (ITEM CODE)":
+    else: # "🔤 เรียงตามรหัสสินค้าอย่างเดียว (ITEM CODE)"
         all_pages_data.sort(key=lambda x: x['sku'])
-    elif sort_mode == "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)":
-        all_pages_data.sort(key=lambda x: (x['zone'], x['sku']))
         
     for page_info in all_pages_data:
         writer.add_page(page_info['reader_page_ref'])
@@ -135,7 +153,7 @@ with col_left:
     st.markdown("<p style='font-size: 1.1rem; color: #4a4a4a;'>ระบบจัดเรียงบิลใบจัดสินค้าและผสานไฟล์อัจฉริยะ เลือกโหมดการคัดจัดเรียงบิลหน้างานได้ตามต้องการ</p>", unsafe_allow_html=True)
 
 with col_right:
-    # 📸 ดึงรูปชื่อยาวๆ ของคุณกุลวัชรมาแสดงโดยตรง
+    # 📸 ดึงรูปพนักงานคลังสินค้าของคุณมาแสดงโดยตรง
     try:
         st.image("stock-availability-restocking-2d-vector-600nw-2682190953.jpg", use_container_width=True)
     except:
@@ -143,14 +161,13 @@ with col_right:
 
 st.markdown("---")
 
-# ส่วนทำงานหลัก
+# ส่วนทำงานหลัก (เหลือ 2 ตัวเลือก)
 st.subheader("⚙️ ขั้นตอนที่ 1: เลือกโหมดการคัดแยกเอกสาร")
 sort_mode = st.radio(
     "ระบบจะเรียงบิลตามเงื่อนไขที่คุณเลือกทันที:",
     [
         "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)",
-        "🔤 เรียงตามรหัสสินค้าอย่างเดียว (ITEM CODE)",
-        "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)"
+        "🔤 เรียงตามรหัสสินค้าอย่างเดียว (ITEM CODE)"
     ],
     index=0,
     horizontal=True
@@ -159,34 +176,40 @@ sort_mode = st.radio(
 st.markdown("---")
 
 st.subheader("📂 ขั้นตอนที่ 2: อัปโหลดไฟล์บิลใบจัดสินค้า (PDF)")
+# ใช้ session state key เพื่อให้สามารถล้างกล่องอัปโหลดได้
 uploaded_files = st.file_uploader(
     "ลากไฟล์ PDF มาวางตรงนี้ (สามารถลากวางพร้อมกันหลายๆ ไฟล์เพื่อรวมยอดรอบเดียวกันได้)", 
     type=["pdf"], 
-    accept_multiple_files=True
+    accept_multiple_files=True,
+    key=f"uploader_{st.session_state.uploader_key}"
 )
 
 if uploaded_files:
     st.info(f"🗂️ ตรวจพบไฟล์ใบงานทั้งหมด: {len(uploaded_files)} ไฟล์ พร้อมสำหรับจัดเรียงข้อมูล")
     
-    if st.button("⚡ เริ่มจัดบิลและสรุปยอดรวม", use_container_width=True):
+    # วางปุ่มประมวลผลให้เป็นปุ่มสีเขียว (Primary)
+    if st.button("⚡ เริ่มจัดบิลและสรุปยอดรวม", type="primary", use_container_width=True):
         with st.spinner("⏳ ระบบกำลังผสานไฟล์ คัดแยกประเภทขนส่ง และสรุปยอดหยิบรวม... กรุณารอสักครู่"):
             try:
                 sorted_pdf, details = process_multiple_pdfs(uploaded_files, sort_mode)
                 st.balloons()
                 
                 df = pd.DataFrame(details)
-                st.success("🎉 ทำรายการสำเร็จเรียบร้อย!")
+                st.success("🎉 ทำรายการสำเร็จเรียบร้อย! เตรียมไฟล์ดาวน์โหลดพร้อมแล้ว")
                 
+                # ปุ่มดาวน์โหลด PDF บิลรวม (สีเขียว)
                 st.download_button(
-                    label="📥 ดาวน์โหลดไฟล์บิล PDF ที่มัดรวมและจัดเรียงใหม่ทั้งหมด",
+                    label="📥 1. ดาวน์โหลดไฟล์บิล PDF ที่มัดรวมและจัดเรียงใหม่ทั้งหมด (สำหรับปรินต์)",
                     data=sorted_pdf,
                     file_name="sharp_sorted_bills.pdf",
                     mime="application/pdf",
+                    type="primary",
                     use_container_width=True
                 )
                 
                 st.markdown("---")
                 
+                # ================= แดชบอร์ดสรุปยอด =================
                 st.subheader("📊 ขั้นตอนที่ 3: สรุปยอดรวมสินค้าจากทุกไฟล์")
                 shopee_count = len(df[df['source'] == "Shopee 🟠"])
                 laz_count = len(df[df['source'] == "Lazada 🔵"])
@@ -199,17 +222,24 @@ if uploaded_files:
                 st.markdown("##")
                 
                 st.write("**📝 ใบสรุปยอดสินค้าที่ต้องหยิบประจำรอบ (Picking List)**")
+                # คำนวณตารางใหม่ให้เหลือแค่เงื่อนไขที่เลือก
                 if sort_mode == "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)":
                     summary_df = df.groupby(['courier', 'sku'])['qty'].sum().reset_index()
                     summary_df.columns = ['บริษัทขนส่ง', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
-                elif sort_mode == "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)":
-                    summary_df = df.groupby(['zone', 'sku'])['qty'].sum().reset_index()
-                    summary_df.columns = ['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
-                    summary_df = summary_df.sort_values(by=['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)'])
                 else:
                     summary_df = df.groupby('sku')['qty'].sum().reset_index()
                     summary_df.columns = ['รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
                     summary_df = summary_df.sort_values(by='รหัสสินค้า (ITEM CODE)')
+                
+                # เพิ่มปุ่มดาวน์โหลดไฟล์ตารางเป็น Excel (CSV)
+                csv_data = summary_df.to_csv(index=False).encode('utf-8-sig') # ใช้ utf-8-sig เพื่อให้ภาษาไทยใน Excel ไม่เพี้ยน
+                st.download_button(
+                    label="📊 2. ดาวน์โหลดใบสรุปยอดหยิบเป็นไฟล์ Excel (CSV)",
+                    data=csv_data,
+                    file_name="picking_list_summary.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
                     
                 st.dataframe(summary_df, use_container_width=True, hide_index=True)
                 
@@ -234,3 +264,15 @@ if uploaded_files:
                     
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาดในการคำนวณข้อมูล: {e}")
+
+# ================= ปุ่มล้างข้อมูลรอบใหม่ (อยู่ด้านล่างสุด) =================
+st.markdown("---")
+col_space, col_reset = st.columns([2, 1])
+with col_reset:
+    if st.button("🔄 เคลียร์ข้อมูล / เริ่มจัดบิลรอบใหม่", use_container_width=True):
+        st.session_state.uploader_key += 1 # สั่งเปลี่ยน Key เพื่อล้างช่องอัปโหลดไฟล์
+        st.rerun() # รีเฟรชหน้าเว็บอัตโนมัติ
+
+
+```
+
