@@ -7,60 +7,141 @@ import pandas as pd
 # 1. ตั้งค่าหน้าเว็บให้คลีนและกว้างเต็มจอ
 st.set_page_config(page_title="Sharp Bill Sorter", page_icon="📦", layout="wide")
 
-# 2. ปรับแต่งดีไซน์ด้วย CSS ขยับรูปภาพการ์ตูนให้อยู่ตรงกลาง และปรับสไตล์ตาราง
+# ================= 🎨 CSS ขั้นเทพ: เนรมิตดีไซน์แบนเนอร์แบบเดียวกับรูปภาพของคุณ =================
 st.markdown("""
     <style>
+    /* ตั้งค่าฟอนต์และพื้นหลังหลักให้เป็นโทนคลีน-โมเดิร์น */
     html, body, [data-testid="stAppViewContainer"] {
-        background-color: #ffffff;
+        background-color: #faf9f6 !important;
         color: #1e293b;
     }
     
-    /* จัดรูปภาพให้อยู่ตรงกลางจอ และทำมุมมนสวยงาม */
-    [data-testid="stImage"] {
+    /* โครงสร้างแบนเนอร์ Sharp Bill Sorter สไตล์แบบรูปภาพ */
+    .hero-banner {
+        background-color: #f4efe6;
+        border-radius: 20px;
+        padding: 40px;
+        margin-bottom: 30px;
         display: flex;
-        justify-content: center;
-        margin: 0 auto;
-    }
-    [data-testid="stImage"] img {
-        border-radius: 16px !important;
-        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+        align-items: center;
+        justify-content: space-between;
+        border: 1px solid #e5dec9;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.03);
     }
     
-    /* ดีไซน์กล่องสถิติภาพรวม (Metrics) */
+    .hero-left {
+        flex: 1;
+        padding-right: 20px;
+    }
+    
+    .hero-title {
+        font-size: 4.2rem;
+        font-weight: 900;
+        line-height: 1.1;
+        color: #1a1a1a;
+        margin: 0 0 15px 0;
+        font-family: 'Inter', 'Prompt', sans-serif;
+    }
+    
+    .hero-title span {
+        display: block;
+    }
+    
+    .hero-subtitle {
+        font-size: 1.2rem;
+        color: #4a4a4a;
+        line-height: 1.6;
+        margin-bottom: 25px;
+        font-family: 'Prompt', sans-serif;
+    }
+    
+    .hero-links {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
+    
+    .hero-link-item {
+        font-size: 0.95rem;
+        color: #1b4d8f;
+        text-decoration: underline;
+        font-weight: 500;
+        cursor: pointer;
+    }
+    
+    .hero-right {
+        flex: 1;
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+    }
+    
+    /* ตกแต่งตารางสรุปแบบแดชบอร์ด */
     div[data-testid="stMetric"] {
-        background-color: #f8fafc;
-        padding: 18px 24px;
+        background-color: #ffffff;
+        padding: 16px 20px;
         border-radius: 12px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        border: 1px solid #e5dec9;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
     }
-    div[data-testid="stMetricLabel"] { font-size: 14px !important; color: #475569 !important; font-weight: 600 !important; }
-    div[data-testid="stMetricValue"] { font-size: 26px !important; font-weight: bold !important; color: #0f172a !important; }
+    div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #64748b !important; font-weight: bold !important; }
+    div[data-testid="stMetricValue"] { font-size: 24px !important; font-weight: bold !important; color: #1e293b !important; }
     
-    /* ดีไซน์ปุ่มหลักสีเขียวสดเด่นสะดุดตา */
+    /* ตกแต่งปุ่มดำเนินการ */
     div.stButton > button:first-child {
-        background-color: #059669 !important;
+        background-color: #10b981 !important;
         color: white !important;
         font-size: 16px !important;
         font-weight: bold !important;
         border-radius: 8px !important;
         border: none !important;
         padding: 0.75rem 2.5rem !important;
-        box-shadow: 0 4px 6px -1px rgba(5, 150, 105, 0.2);
+        box-shadow: 0 4px 10px rgba(16, 185, 129, 0.2);
     }
     div.stButton > button:first-child:hover {
-        background-color: #047857 !important;
+        background-color: #059669 !important;
     }
     
+    /* ปรับปรุงขนาดและสีของกล่อง File Uploader */
+    div[data-testid="stFileUploader"] {
+        background-color: #ffffff;
+        border: 2px dashed #e5dec9;
+        border-radius: 12px;
+        padding: 20px;
+    }
+    
+    /* 📱 บังคับให้รองรับมือถือแบบ Responsive สมบูรณ์แบบ */
     @media (max-width: 768px) {
-        .block-container { padding: 1rem 0.5rem !important; }
-        div[data-testid="stMetric"] { margin-bottom: 10px !important; width: 100% !important; }
+        .hero-banner {
+            flex-direction: column-reverse;
+            padding: 24px;
+            gap: 20px;
+        }
+        .hero-left {
+            padding-right: 0;
+            text-align: center;
+        }
+        .hero-title {
+            font-size: 2.6rem;
+        }
+        .hero-subtitle {
+            font-size: 1rem;
+        }
+        .hero-right {
+            justify-content: center;
+            width: 100%;
+        }
+        .hero-links {
+            align-items: center;
+        }
+        div[data-testid="stMetric"] { margin-bottom: 8px !important; width: 100% !important; }
         div[data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; }
     }
     </style>
 """, unsafe_allow_html=True)
 
-# --- ฟังก์ชันจัดการข้อมูลเบื้องหลัง (Core Logic) ---
+# --- ฟังก์ชันหลักในการแกะและคัดแยกข้อมูลใบงาน ---
 def detect_courier(track_no, source):
     if not track_no or track_no == "Unknown": return source
     t = track_no.upper()
@@ -101,13 +182,10 @@ def extract_data_from_page(text):
     
     return data
 
-# --- ฟังก์ชันประมวลผลรองรับหลายไฟล์พร้อมกัน ---
 def process_multiple_pdfs(uploaded_files, sort_mode):
     all_pages_data = []
     writer = PdfWriter()
-    global_page_index = 0
     
-    # วนลูปอ่านทีละไฟล์เพื่อประหยัด RAM (เปิดเสร็จเคลียร์ทิ้งทันที)
     for file_index, uploaded_file in enumerate(uploaded_files):
         file_bytes = uploaded_file.read()
         reader = PdfReader(io.BytesIO(file_bytes))
@@ -115,13 +193,10 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
         for page in reader.pages:
             text = page.extract_text() or ""
             page_info = extract_data_from_page(text)
-            
-            # เก็บข้อมูลตำแหน่งหน้าและตัวระบุไฟล์ไว้เชื่อมโยงตอนมัดรวมไฟล์
             page_info['file_index'] = file_index
             page_info['reader_page_ref'] = page
             all_pages_data.append(page_info)
             
-    # จัดเรียงข้อมูลทั้งหมดตามโหมดที่เลือก
     if sort_mode == "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)":
         all_pages_data.sort(key=lambda x: (x['courier'], x['sku']))
     elif sort_mode == "🔤 เรียงตามรหัสสินค้าอย่างเดียว (ITEM CODE)":
@@ -129,7 +204,6 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
     elif sort_mode == "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)":
         all_pages_data.sort(key=lambda x: (x['zone'], x['sku']))
         
-    # สร้างไฟล์ PDF มัดรวมเล่มใหม่
     for page_info in all_pages_data:
         writer.add_page(page_info['reader_page_ref'])
         
@@ -139,15 +213,83 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
     
     return output_pdf, all_pages_data
 
-# --- ส่วนแสดงผลหน้าเว็บ (UI Layout) ---
+# ================= 🚀 หน้าการแสดงผลเว็บไซต์ (UI Layout) =================
 
-# 🖼️ เปลี่ยนเป็นรูปการ์ตูนคลังสินค้า 3D สีสันสดใส ลิงก์ตรงจากเว็บบล็อกภาพกราฟิกคลีนๆ
-st.image("https://img.freepik.com/free-vector/isometric-warehouse-horizontal-illustration_1284-57223.jpg", width=380)
+# เรนเดอร์แบนเนอร์ที่มีดีไซน์เดียวกับรูปภาพของคุณด้วย HTML + เวกเตอร์ชั้นวางพัสดุ (SVG 3D)
+st.markdown("""
+    <div class="hero-banner">
+        <div class="hero-left">
+            <h1 class="hero-title">
+                <span>Sharp Bill</span>
+                <span>Sorter</span>
+            </h1>
+            <p class="hero-subtitle">
+                ระบบจัดเรียงบิล เลือกโหมดการคัดจัดเรียงบิลหน้างานได้ตามต้องการ
+            </p>
+            <div class="hero-links">
+                <span class="hero-link-item">www.reallygreatsite.com</span>
+                <span class="hero-link-item">www.reallygreatsite.com</span>
+                <span class="hero-link-item">www.reallygreatsite.com</span>
+            </div>
+        </div>
+        <div class="hero-right">
+            <!-- ภาพเวกเตอร์ 3D Isometric ชั้นวางคลังสินค้าและกล่องพัสดุ ตรงตามรูปเป๊ะๆ -->
+            <svg width="340" height="280" viewBox="0 0 340 280" fill="none" xmlns="http://www.w3.org/2000/svg" style="max-width: 100%; height: auto;">
+                <!-- โครงสร้างชั้นเหล็กสีน้ำเงิน -->
+                <!-- เสาหลัง -->
+                <path d="M190 20 L200 20 L200 230 L190 230 Z" fill="#1b4d8f" />
+                <path d="M290 80 L300 80 L300 250 L290 250 Z" fill="#1b4d8f" />
+                <!-- เสาหน้า -->
+                <path d="M90 120 L100 120 L100 270 L90 270 Z" fill="#2563eb" />
+                <path d="M190 150 L200 150 L200 270 L190 270 Z" fill="#2563eb" />
+                
+                <!-- คานเหล็กชั้นกลาง -->
+                <path d="M95 180 L295 110 L295 116 L95 186 Z" fill="#3b82f6" />
+                <path d="M95 180 L195 210 L195 216 L95 186 Z" fill="#1d4ed8" />
+                
+                <!-- คานเหล็กชั้นล่างสุด -->
+                <path d="M95 250 L295 180 L295 186 L95 256 Z" fill="#3b82f6" />
+                <path d="M95 250 L195 270 L195 276 L95 256 Z" fill="#1d4ed8" />
+                
+                <!-- ตะแกรงชั้นกลาง -->
+                <polygon points="95,180 195,150 295,110 195,150" fill="#94a3b8" opacity="0.3" />
+                
+                <!-- กล่องพัสดุ 3D ชั้นล่าง -->
+                <g transform="translate(140, 185)">
+                    <!-- ด้านบนกล่อง -->
+                    <polygon points="0,-15 35,-30 70,-15 35,0" fill="#f5c285" />
+                    <!-- ด้านข้างซ้าย (เงา) -->
+                    <polygon points="0,-15 35,0 35,35 0,20" fill="#cc9652" />
+                    <!-- ด้านข้างขวา -->
+                    <polygon points="35,0 70,-15 70,20 35,35" fill="#e5ab65" />
+                    <!-- สัญลักษณ์ไอคอนกล่อง -->
+                    <path d="M12,12 L22,17 M12,17 L22,12" stroke="#4a321a" stroke-width="2" />
+                </g>
+                
+                <!-- กล่องพัสดุ 3D ชั้นกลาง -->
+                <g transform="translate(125, 105)">
+                    <!-- ด้านบนกล่อง -->
+                    <polygon points="0,-20 45,-38 90,-20 45,2" fill="#e5ab65" />
+                    <!-- ด้านข้างซ้าย (เงา) -->
+                    <polygon points="0,-20 45,2 45,45 0,23" fill="#b07d40" />
+                    <!-- ด้านข้างขวา -->
+                    <polygon points="45,2 90,-20 90,23 45,45" fill="#cc9652" />
+                    <!-- โลโก้รอยเทปกาว -->
+                    <polygon points="40,-15 50,-11 50,22 40,18" fill="#4a321a" opacity="0.4" />
+                </g>
+                
+                <!-- กล่องพัสดุ 3D ใบเฉียงยาว ด้านหลัง -->
+                <g transform="translate(180, 50)">
+                    <polygon points="0,-10 50,-25 90,-10 40,5" fill="#f5c285" />
+                    <polygon points="0,-10 40,5 40,55 0,40" fill="#cc9652" />
+                    <polygon points="40,5 90,-10 90,40 40,55" fill="#e5ab65" />
+                </g>
+            </svg>
+        </div>
+    </div>
+""", unsafe_allow_html=True)
 
-st.title("🏢 Sharp Bill Sorter")
-st.caption("ระบบจัดการบิลใบจัดสินค้าและสรุปยอดหยิบรวมอัจฉริยะ (เวอร์ชันการ์ตูนคลีน & รองรับไฟล์ใหญ่)")
-st.markdown("---")
-
+# ส่วนการใช้งานหลักด้านล่างแบนเนอร์
 st.subheader("⚙️ ขั้นตอนที่ 1: เลือกโหมดการคัดแยกเอกสาร")
 sort_mode = st.radio(
     "ระบบจะเรียงบิลตามเงื่อนไขที่คุณเลือกทันที:",
@@ -163,25 +305,26 @@ sort_mode = st.radio(
 st.markdown("---")
 
 st.subheader("📂 ขั้นตอนที่ 2: อัปโหลดไฟล์บิลใบจัดสินค้า (PDF)")
-# เปลี่ยนเป็น accept_multiple_files=True เพื่อให้ลากวางหลายไฟล์พร้อมกันได้ปลดล็อกหมื่นหน้า
+# ระบบอัปโหลดได้หลายไฟล์พร้อมกันเพื่อทะลุขีดจำกัด 10,000 หน้า
 uploaded_files = st.file_uploader(
-    "ลากไฟล์ PDF มาวางตรงนี้ (เลือกอัปโหลดพร้อมกันได้ทีละหลายไฟล์)", 
+    "ลากไฟล์ PDF มาวางตรงนี้ (สามารถลากวางพร้อมกันหลายๆ ไฟล์เพื่อรวมยอดรอบเดียวกันได้)", 
     type=["pdf"], 
     accept_multiple_files=True
 )
 
 if uploaded_files:
-    st.info(f"🗂️ ตรวจพบไฟล์ทั้งหมด: {len(uploaded_files)} ไฟล์ พร้อมทำการรวมและจัดเรียงข้อมูล")
+    st.info(f"🗂️ ตรวจพบไฟล์ใบงานทั้งหมด: {len(uploaded_files)} ไฟล์ พร้อมสำหรับจัดเรียงข้อมูล")
     
-    if st.button("⚡ เริ่มประมวลผลข้อมูลและจัดบิลใหม่", use_container_width=True):
-        with st.spinner("⏳ ระบบกำลังผสานไฟล์และคัดแยกยอดหยิบรวม... กรุณารอสักครู่"):
+    if st.button("⚡ เริ่มจัดบิลและสรุปยอดรวม", use_container_width=True):
+        with st.spinner("⏳ ระบบกำลังผสานไฟล์ คัดแยกประเภทขนส่ง และสรุปยอดหยิบรวม... กรุณารอสักครู่"):
             try:
                 sorted_pdf, details = process_multiple_pdfs(uploaded_files, sort_mode)
                 st.balloons()
                 
                 df = pd.DataFrame(details)
-                st.success("🎉 ทำรายการสำเร็จ! ระบบทำการรวมไฟล์และจัดเรียงบิลเรียบร้อยแล้ว")
+                st.success("🎉 ทำรายการสำเร็จเรียบร้อย!")
                 
+                # ปุ่มดาวน์โหลดไฟล์สีเขียวสด
                 st.download_button(
                     label="📥 ดาวน์โหลดไฟล์บิล PDF ที่มัดรวมและจัดเรียงใหม่ทั้งหมด",
                     data=sorted_pdf,
@@ -192,45 +335,45 @@ if uploaded_files:
                 
                 st.markdown("---")
                 
-                # แดชบอร์ดสรุปยอดรวมของทุกไฟล์
-                st.subheader("📊 ขั้นตอนที่ 3: ยอดสรุปการหยิบสินค้าทั้งหมด (จากทุกไฟล์รวมกัน)")
+                # ================= แดชบอร์ดสรุปยอดประจำรอบ =================
+                st.subheader("📊 ขั้นตอนที่ 3: สรุปยอดรวมสินค้าจากทุกไฟล์")
                 shopee_count = len(df[df['source'] == "Shopee 🟠"])
                 laz_count = len(df[df['source'] == "Lazada 🔵"])
                 
                 col1, col2, col3 = st.columns(3)
-                with col1: st.metric("📋 ใบออเดอร์รวมทั้งหมด", f"{len(df)} บิล")
+                with col1: st.metric("📋 ใบออเดอร์รวม", f"{len(df)} บิล")
                 with col2: st.metric("🧺 ยอดสินค้าที่ต้องเดินหยิบ", f"{df['qty'].sum()} ชิ้น")
-                with col3: st.metric("🚚 แยกช่องทาง Shopee/Lazada", f"Shopee: {shopee_count} | Lazada: {laz_count}")
+                with col3: st.metric("🚚 แยกค่ายยอดออเดอร์", f"Shopee: {shopee_count} | Lazada: {laz_count}")
                 
                 st.markdown("##")
                 
-                # ตารางใบสรุปยอดหยิบรวม (Picking Summary)
-                st.write("**📝 ตารางใบสรุปยอดหยิบสินค้ารวมประจำรอบ (Picking List)**")
+                # ================= ตารางสรุปยอดหยิบรวม (Picking Summary) =================
+                st.write("**📝 ใบสรุปยอดสินค้าที่ต้องหยิบประจำรอบ (Picking List)**")
                 if sort_mode == "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)":
                     summary_df = df.groupby(['courier', 'sku'])['qty'].sum().reset_index()
-                    summary_df.columns = ['บริษัทขนส่ง', 'รหัสสินค้า (ITEM CODE)', 'จำนวนที่ต้องหยิบ (ชิ้น)']
+                    summary_df.columns = ['บริษัทขนส่ง', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
                     summary_df = summary_df.sort_values(by=['บริษัทขนส่ง', 'รหัสสินค้า (ITEM CODE)'])
                 elif sort_mode == "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)":
                     summary_df = df.groupby(['zone', 'sku'])['qty'].sum().reset_index()
-                    summary_df.columns = ['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)', 'จำนวนที่ต้องหยิบ (ชิ้น)']
+                    summary_df.columns = ['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
                     summary_df = summary_df.sort_values(by=['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)'])
                 else:
                     summary_df = df.groupby('sku')['qty'].sum().reset_index()
-                    summary_df.columns = ['รหัสสินค้า (ITEM CODE)', 'จำนวนที่ต้องหยิบ (ชิ้น)']
+                    summary_df.columns = ['รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
                     summary_df = summary_df.sort_values(by='รหัสสินค้า (ITEM CODE)')
                     
                 st.dataframe(summary_df, use_container_width=True, hide_index=True)
                 
                 st.markdown("---")
                 
-                # ช่องค้นหาตำแหน่งหน้าบิลใหม่
-                st.write("**🔍 ช่องค้นหาออเดอร์ด่วนและตรวจสอบตำแหน่งหน้าบิล**")
+                # ================= ช่องค้นหาตำแหน่งใบงานด่วน =================
+                st.write("**🔍 ค้นหาออเดอร์ด่วนและตรวจสอบหน้าเอกสาร**")
                 display_df = df.copy()
                 display_df['หน้าใหม่'] = display_df.index + 1
                 display_df = display_df[['หน้าใหม่', 'courier', 'zone', 'sku', 'qty', 'order_id']]
-                display_df.columns = ['บิลใบที่ (หน้าใหม่ในเล่มรวม)', 'บริษัทขนส่ง', 'โซนคลัง', 'รหัสสินค้า', 'จำนวน', 'Order ID']
+                display_df.columns = ['บิลใบที่ (หน้าใหม่)', 'บริษัทขนส่ง', 'โซนคลัง', 'รหัสสินค้า', 'จำนวน', 'Order ID']
                 
-                search_query = st.text_input("พิมพ์รหัสสินค้า, ชื่อขนส่ง หรือ Order ID เพื่อส่องตำแหน่งหน้าบิลในเล่มรวมทันที:")
+                search_query = st.text_input("พิมพ์รหัสสินค้า, ชื่อขนส่ง หรือ Order ID เพื่อส่องตำแหน่งหน้าทันที:")
                 if search_query:
                     filtered_df = display_df[
                         display_df['รหัสสินค้า'].str.contains(search_query, case=False, na=False) |
@@ -242,4 +385,4 @@ if uploaded_files:
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
                     
             except Exception as e:
-                st.error(f"เกิดข้อผิดพลาดในการประมวลผลระบบ: {e}")
+                st.error(f"เกิดข้อผิดพลาดในการคำนวณข้อมูล: {e}")
