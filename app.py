@@ -28,8 +28,7 @@ st.markdown("""
     div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #64748b !important; font-weight: bold !important; }
     div[data-testid="stMetricValue"] { font-size: 24px !important; font-weight: bold !important; color: #1e293b !important; }
     
-    /* บังคับปุ่มดาวน์โหลด/ดำเนินการหลักให้เป็นสีเขียวเสมอ */
-    button[data-testid="baseButton-primary"] {
+    button[kind="primary"] {
         background-color: #10b981 !important;
         border-color: #10b981 !important;
         color: white !important;
@@ -39,7 +38,7 @@ st.markdown("""
         padding: 0.75rem 2.5rem !important;
         box-shadow: 0 4px 10px rgba(16, 185, 129, 0.2);
     }
-    button[data-testid="baseButton-primary"]:hover {
+    button[kind="primary"]:hover {
         background-color: #059669 !important;
         border-color: #059669 !important;
     }
@@ -68,25 +67,28 @@ def detect_courier(track_no, source):
     return f"ขนส่งอื่นๆ ({source.split()[0]}) 🚚"
 
 def extract_data_from_page(text):
-    # ตั้งค่าตั้งต้น จำนวน = 1
     data = {'zone': 'Unknown', 'sku': 'ZZZZZZ', 'qty': 1, 'source': 'Unknown', 'track_no': 'Unknown', 'courier': 'Unknown', 'order_id': 'Unknown'}
     if not text: return data
     
-    # ดึง Track No
+    # 1. ดึง Track No
     track_match = re.search(r'Track\s*No\s*:\s*([\w-]+)', text, re.IGNORECASE)
     if track_match: data['track_no'] = track_match.group(1).strip()
     
-    # ดึง Platform
+    # 2. ดึง Platform
     if "Shopee" in text: data['source'] = "Shopee 🟠"
     elif "Lada" in text or "Lazada" in text: data['source'] = "Lazada 🔵"
     
     data['courier'] = detect_courier(data['track_no'], data['source'])
     
-    # ดึง Zone
+    # 3. ดึง Zone
     zone_match = re.search(r'\b(G\d+)\b', text)
     if zone_match: data['zone'] = zone_match.group(1)
     
-    # ดึง SKU
+    # 4. ดึง Order ID
+    order_match = re.search(r'Order ID\s*:\s*([\w-]+)', text, re.IGNORECASE)
+    if order_match: data['order_id'] = order_match.group(1)
+
+    # 5. ดึง SKU
     sku_match = re.search(r'\b\d+-[A-Z]+-[A-Z]+-\d+\b', text)
     if sku_match: 
         data['sku'] = sku_match.group(0)
@@ -95,27 +97,55 @@ def extract_data_from_page(text):
             if "1-GDS-" in line:
                 m = re.search(r'(1-GDS-[\w-]+)', line)
                 if m: data['sku'] = m.group(1); break
+
+    # 🌟 6. แกะจำนวนชิ้น (Custom-made สำหรับ Sharp PDF) 🌟
+    found_qty = False
+    
+    # วิธีที่ 1: หาคำว่า "รวมทั้งสิ้น" ที่โดนแยกบรรทัด (เจอบ่อยใน Shopee)
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        if "รวมทั้งสิ้น" in line:
+            # ลองหาในบรรทัดเดียวกันก่อน
+            m = re.search(r'รวมทั้งสิ้น\s*(\d+)', line)
+            if m:
+                data['qty'] = int(m.group(1))
+                found_qty = True
+                break
+            # ถ้าไม่เจอ ลองดูบรรทัดถัดไป
+            elif i + 1 < len(lines):
+                next_line = lines[i+1].strip()
+                if next_line.isdigit():
+                    data['qty'] = int(next_line)
+                    found_qty = True
+                    break
+
+    # วิธีที่ 2: สแกนบรรทัดที่มี SKU เพื่อหาตัวเลขจำนวน
+    if not found_qty and data['sku'] != 'ZZZZZZ':
+        for line in lines:
+            if data['sku'] in line:
+                clean_line = line.replace(data['sku'], '').strip()
                 
-    # 🌟 [อัปเกรด] ดึงจำนวนชิ้น (QTY) แบบสแกนละเอียด 🌟
-    qty_patterns = [
-        r'จำนวน\s*:\s*(\d+)',            # จำนวน : 2
-        r'จำนวน\s*(\d+)',                # จำนวน 2
-        r'รวมทั้งสิ้น\s*(\d+)',           # รวมทั้งสิ้น 2
-        r'รวม\s*(\d+)\s*ชิ้น',           # รวม 2 ชิ้น
-        r'Qty\s*:\s*(\d+)',              # Qty : 2
-        r'Quantity\s*:\s*(\d+)'          # Quantity : 2
-    ]
-    
-    for pattern in qty_patterns:
-        qty_match = re.search(pattern, text, re.IGNORECASE)
-        if qty_match:
-            data['qty'] = int(qty_match.group(1))
-            break # ถ้าเจอจำนวนแล้วให้หยุดหาทันที
-            
-    # ดึง Order ID
-    order_match = re.search(r'Order ID\s*:\s*([\w-]+)', text, re.IGNORECASE)
-    if order_match: data['order_id'] = order_match.group(1)
-    
+                # โอกาสที่ A: มีตัวเลขอยู่ข้างหน้า SKU เช่น "2 1-GDS-SHARP-..." (Lazada)
+                m_front = re.match(r'^(\d+)\s+', clean_line)
+                if m_front:
+                    data['qty'] = int(m_front.group(1))
+                    found_qty = True
+                    break
+                
+                # โอกาสที่ B: หาคำว่า V-2, V-3 แบบในตัวอย่างหน้าแรก
+                m_v = re.search(r'V-(\d+)', line)
+                if m_v:
+                     data['qty'] = int(m_v.group(1))
+                     found_qty = True
+                     break
+
+                # โอกาสที่ C: มีตัวเลขโดดๆ อยู่ท้ายประโยค
+                m_end = re.search(r'\s(\d+)\s*$', clean_line)
+                if m_end:
+                    data['qty'] = int(m_end.group(1))
+                    found_qty = True
+                    break
+
     return data
 
 def process_multiple_pdfs(uploaded_files, sort_mode):
@@ -215,7 +245,7 @@ if uploaded_files:
                 st.subheader("📊 ขั้นตอนที่ 3: สรุปยอดรวมสินค้าจากทุกไฟล์")
                 shopee_count = len(df[df['source'] == "Shopee 🟠"])
                 laz_count = len(df[df['source'] == "Lazada 🔵"])
-                total_qty = df['qty'].sum() # คำนวณยอดชิ้นใหม่
+                total_qty = df['qty'].sum()
                 
                 col1, col2, col3 = st.columns(3)
                 with col1: st.metric("📋 ใบออเดอร์รวม", f"{len(df)} บิล")
