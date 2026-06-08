@@ -98,7 +98,7 @@ def extract_data_from_page(text):
                 
     # 5. ดึงยอดชิ้น (รีดบรรทัดให้เป็นเส้นตรง เพื่อแก้ปัญหาคำว่า "รวมทั้งสิ้น" โดนตัดบรรทัด)
     clean_text_for_qty = text.replace('\n', ' ').replace('\r', ' ')
-    qty_match = re.search(r'รวมทั้งสิ้น\s*(\d+)', clean_text_for_qty)
+    qty_match = re.search(r'รวมทั้งสิ้น s*(\d+)', clean_text_for_qty)
     if qty_match: 
         data['qty'] = int(qty_match.group(1))
     else:
