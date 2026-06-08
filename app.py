@@ -24,7 +24,6 @@ st.markdown("""
     div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #64748b !important; font-weight: bold !important; }
     div[data-testid="stMetricValue"] { font-size: 24px !important; font-weight: bold !important; color: #1e293b !important; }
     
-    /* ตกแต่งปุ่มดำเนินการ */
     div.stButton > button:first-child {
         background-color: #10b981 !important;
         color: white !important;
@@ -125,9 +124,9 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
     
     return output_pdf, all_pages_data
 
-# ================= 🚀 หน้าการแสดงผลเว็บไซต์ (แก้ไขให้สมบูรณ์) =================
+# ================= 🚀 หน้าการแสดงผลเว็บไซต์ =================
 
-st.markdown("<br>", unsafe_allow_html=True) # เว้นที่ว่างด้านบนนิดหน่อยให้ดูโปร่ง
+st.markdown("<br>", unsafe_allow_html=True) 
 
 col_left, col_right = st.columns([2, 1])
 
@@ -136,9 +135,9 @@ with col_left:
     st.markdown("<p style='font-size: 1.1rem; color: #4a4a4a;'>ระบบจัดเรียงบิลใบจัดสินค้าและผสานไฟล์อัจฉริยะ เลือกโหมดการคัดจัดเรียงบิลหน้างานได้ตามต้องการ</p>", unsafe_allow_html=True)
 
 with col_right:
-    # ลองดึงรูป logo.jpg ใน GitHub ถ้าหาไม่เจอจะใช้รูประบบคลังสินค้า 3D แทน
+    # 📸 ดึงรูปชื่อยาวๆ ของคุณกุลวัชรมาแสดงโดยตรง
     try:
-        st.image("logo.jpg", use_container_width=True)
+        st.image("stock-availability-restocking-2d-vector-600nw-2682190953.jpg", use_container_width=True)
     except:
         st.image("https://img.freepik.com/free-vector/isometric-warehouse-horizontal-illustration_1284-57223.jpg", use_container_width=True)
 
@@ -188,7 +187,6 @@ if uploaded_files:
                 
                 st.markdown("---")
                 
-                # ================= แดชบอร์ดสรุปยอด =================
                 st.subheader("📊 ขั้นตอนที่ 3: สรุปยอดรวมสินค้าจากทุกไฟล์")
                 shopee_count = len(df[df['source'] == "Shopee 🟠"])
                 laz_count = len(df[df['source'] == "Lazada 🔵"])
