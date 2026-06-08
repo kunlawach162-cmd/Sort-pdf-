@@ -272,6 +272,3 @@ with col_reset:
         st.session_state.uploader_key += 1 # สั่งเปลี่ยน Key เพื่อล้างช่องอัปโหลดไฟล์
         st.rerun() # รีเฟรชหน้าเว็บอัตโนมัติ
 
-
-```
-
