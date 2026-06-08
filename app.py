@@ -1,10 +1,11 @@
 import streamlit as st
-from pypdf import PdfReader, PdfWriter
+import fitz
 import pandas as pd
 import re
 import io
 
 # ================= PAGE CONFIG =================
+
 st.set_page_config(
     page_title="Sharp Bill Sorter",
     page_icon="📦",
@@ -12,50 +13,45 @@ st.set_page_config(
 )
 
 # ================= SESSION =================
+
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
 # ================= CSS =================
+
 st.markdown("""
 <style>
 
 html, body, [data-testid="stAppViewContainer"] {
-    background-color: #faf9f6 !important;
-    color: #1e293b;
+    background-color: #faf9f6;
+    color: #111827;
 }
 
 .block-container {
     padding-top: 1rem;
 }
 
-h1, h2, h3 {
-    color: #111827;
-}
-
 div[data-testid="stMetric"] {
-    background-color: white;
-    padding: 18px;
-    border-radius: 14px;
+    background: white;
     border: 1px solid #e5e7eb;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    border-radius: 14px;
+    padding: 18px;
 }
 
 button[kind="primary"] {
     background-color: #10b981 !important;
     border-color: #10b981 !important;
     color: white !important;
-    font-weight: bold !important;
     border-radius: 10px !important;
-    height: 3rem;
+    font-weight: bold !important;
 }
 
 button[kind="primary"]:hover {
     background-color: #059669 !important;
-    border-color: #059669 !important;
 }
 
 div[data-testid="stFileUploader"] {
-    background-color: white;
+    background: white;
     border: 2px dashed #d1d5db;
     border-radius: 14px;
     padding: 20px;
@@ -113,12 +109,16 @@ def extract_track(text):
 
     for pattern in patterns:
 
-        match = re.search(pattern, text, re.IGNORECASE)
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE
+        )
 
         if match:
             return match.group(1).strip()
 
-    return "Unknown"
+    return ""
 
 
 def extract_zone(text):
@@ -133,22 +133,39 @@ def extract_zone(text):
 
 def extract_order_id(text):
 
-    match = re.search(
+    patterns = [
+
         r'Order\s*ID\s*:\s*([A-Z0-9\-]+)',
-        text,
-        re.IGNORECASE
-    )
 
-    if match:
-        return match.group(1).strip()
+        r'เลขคำสั่งซื้อ\s*:\s*([A-Z0-9\-]+)',
 
-    return "Unknown"
+        r'หมายเลขคำสั่งซื้อ\s*:\s*([A-Z0-9\-]+)'
+    ]
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            text,
+            re.IGNORECASE
+        )
+
+        if match:
+
+            value = match.group(1).strip()
+
+            if value.lower() != "track":
+                return value
+
+    return ""
 
 
 def extract_sku(text):
 
     patterns = [
+
         r'(1-GDS-[A-Z0-9\-]+)',
+
         r'(\d+-[A-Z]+-[A-Z0-9\-]+)'
     ]
 
@@ -162,11 +179,7 @@ def extract_sku(text):
     return "ZZZZZZ"
 
 
-# ================= FIXED QTY =================
-# อ่านจาก format จริง:
-# P 1
-# DX 2
-# GX 1
+# ================= FIX QTY =================
 
 def extract_qty(text):
 
@@ -176,6 +189,7 @@ def extract_qty(text):
 
         line = line.strip()
 
+        # เช่น P 1 / DX 2 / GX 1
         match = re.match(
             r'^[A-Z]{1,3}\s+(\d{1,3})$',
             line
@@ -188,17 +202,16 @@ def extract_qty(text):
             if 1 <= qty <= 50:
                 return qty
 
-    # fallback
     full_text = text.replace("\n", " ")
 
-    total_match = re.search(
+    fallback = re.search(
         r'รวมทั้งสิ้น\s*(\d{1,3})',
         full_text
     )
 
-    if total_match:
+    if fallback:
 
-        qty = int(total_match.group(1))
+        qty = int(fallback.group(1))
 
         if 1 <= qty <= 50:
             return qty
@@ -209,13 +222,20 @@ def extract_qty(text):
 def extract_data_from_page(text):
 
     data = {
+
         "zone": "Unknown",
+
         "sku": "ZZZZZZ",
+
         "qty": 1,
+
         "source": "Unknown",
-        "track_no": "Unknown",
+
+        "track_no": "",
+
         "courier": "Unknown",
-        "order_id": "Unknown"
+
+        "order_id": ""
     }
 
     if not text:
@@ -247,18 +267,21 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
     all_pages_data = []
 
-    writer = PdfWriter()
+    merged_pdf = fitz.open()
 
     total_pages = 0
 
-    # นับหน้าทั้งหมด
+    # นับหน้า
     for uploaded_file in uploaded_files:
 
         file_bytes = uploaded_file.getvalue()
 
-        reader = PdfReader(io.BytesIO(file_bytes))
+        pdf = fitz.open(
+            stream=file_bytes,
+            filetype="pdf"
+        )
 
-        total_pages += len(reader.pages)
+        total_pages += len(pdf)
 
     progress_bar = st.progress(0)
 
@@ -269,27 +292,33 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
         file_bytes = uploaded_file.getvalue()
 
-        reader = PdfReader(io.BytesIO(file_bytes))
+        pdf = fitz.open(
+            stream=file_bytes,
+            filetype="pdf"
+        )
 
-        for page in reader.pages:
+        for page_num in range(len(pdf)):
 
-            text = page.extract_text() or ""
+            page = pdf[page_num]
+
+            text = page.get_text()
 
             page_info = extract_data_from_page(text)
 
-            page_info["file_index"] = file_index
+            page_info["pdf"] = pdf
 
-            page_info["reader_page_ref"] = page
+            page_info["page_num"] = page_num
 
             all_pages_data.append(page_info)
 
             processed_pages += 1
 
-            progress = processed_pages / total_pages
-
-            progress_bar.progress(progress)
+            progress_bar.progress(
+                processed_pages / total_pages
+            )
 
     # SORT
+
     if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
 
         all_pages_data.sort(
@@ -315,16 +344,19 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
             key=lambda x: x["sku"]
         )
 
-    # WRITE PDF
-    for page_info in all_pages_data:
+    # MERGE PDF
 
-        writer.add_page(
-            page_info["reader_page_ref"]
+    for item in all_pages_data:
+
+        merged_pdf.insert_pdf(
+            item["pdf"],
+            from_page=item["page_num"],
+            to_page=item["page_num"]
         )
 
     output_pdf = io.BytesIO()
 
-    writer.write(output_pdf)
+    merged_pdf.save(output_pdf)
 
     output_pdf.seek(0)
 
@@ -410,18 +442,21 @@ if uploaded_files:
             col1, col2, col3 = st.columns(3)
 
             with col1:
+
                 st.metric(
                     "📋 จำนวนออเดอร์",
                     f"{total_orders} บิล"
                 )
 
             with col2:
+
                 st.metric(
                     "📦 จำนวนสินค้ารวม",
                     f"{total_qty} ชิ้น"
                 )
 
             with col3:
+
                 st.metric(
                     "🛒 Marketplace",
                     f"Shopee {shopee_count} | Lazada {lazada_count}"
@@ -439,6 +474,8 @@ if uploaded_files:
                 use_container_width=True,
                 type="primary"
             )
+
+            st.markdown("---")
 
             # ================= SUMMARY =================
 
@@ -492,14 +529,8 @@ if uploaded_files:
                     by=["SKU"]
                 )
 
-            # HOT ITEM
-            if "จำนวน" in summary_df.columns:
+            # CSV
 
-                summary_df["🔥HOT"] = summary_df["จำนวน"].apply(
-                    lambda x: "🔥" if x >= 10 else ""
-                )
-
-            # DOWNLOAD CSV
             csv_data = summary_df.to_csv(
                 index=False
             ).encode("utf-8-sig")
@@ -526,11 +557,11 @@ if uploaded_files:
 
             display_df = df.copy()
 
-            display_df["หน้าใหม่"] = display_df.index + 1
+            display_df["หน้า"] = display_df.index + 1
 
             display_df = display_df[
                 [
-                    "หน้าใหม่",
+                    "หน้า",
                     "courier",
                     "zone",
                     "sku",
