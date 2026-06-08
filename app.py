@@ -45,7 +45,7 @@ st.markdown("""
         }
     }
     </style>
-""", unsafe_context=True)
+""", unsafe_allow_html=True) # ✨ แก้ไขเป็น unsafe_allow_html ตรงนี้เรียบร้อยครับ
 
 # --- ฟังก์ชันแกะข้อมูลจาก PDF ---
 def extract_data_from_page(text):
@@ -169,12 +169,11 @@ if uploaded_file is not None:
                 
                 st.markdown("---")
                 
-                # ================= ส่วนแดชบอร์ดสรุปงานคลัง (แบ่งคอลัมน์อัตโนมัติ) =================
+                # ================= ส่วนแดชบอร์ดสรุปงานคลัง =================
                 st.subheader("📊 สรุปภาพรวม")
                 shopee_count = len(df[df['source'] == "Shopee 🟠"])
                 laz_count = len(df[df['source'] == "Lazada 🔵"])
                 
-                # ใช้ระบบคอลัมน์ปกติ (บน PC จะอยู่แนวนอน บนมือถือจะตัดลงมาเป็นแนวตั้งให้อัตโนมัติด้วย CSS)
                 col1, col2, col3 = st.columns(3)
                 with col1: st.metric("📋 จำนวนใบงานทั้งหมด", f"{len(df)} ใบ")
                 with col2: st.metric("🧺 สินค้าที่ต้องหยิบรวม", f"{df['qty'].sum()} ชิ้น")
@@ -219,4 +218,3 @@ if uploaded_file is not None:
                     
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาด: {e}")
-
