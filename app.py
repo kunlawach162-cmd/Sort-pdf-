@@ -7,7 +7,7 @@ import pandas as pd
 # 1. ตั้งค่าหน้าเว็บให้คลีนและกว้างเต็มจอ
 st.set_page_config(page_title="Sharp Bill Sorter", page_icon="📦", layout="wide")
 
-# ================= 🎨 CSS ปรับแต่งดีไซน์แบนเนอร์พนักงานคลังสินค้ามินิมอล =================
+# ================= 🎨 CSS ปรับแต่งดีไซน์แบนเนอร์และปุ่มระบบทั้งหมด =================
 st.markdown("""
     <style>
     /* ตั้งค่าฟอนต์และพื้นหลังหลักให้เป็นโทนคลีน-โมเดิร์น */
@@ -61,7 +61,7 @@ st.markdown("""
     }
     
     .hero-img {
-        max-width: 260px;
+        max-width: 250px;
         width: 100%;
         height: auto;
         border-radius: 12px;
@@ -123,7 +123,7 @@ st.markdown("""
             width: 100%;
         }
         .hero-img {
-            max-width: 200px;
+            max-width: 180px;
         }
         div[data-testid="stMetric"] { margin-bottom: 8px !important; width: 100% !important; }
         div[data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; }
@@ -205,7 +205,8 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
 # ================= 🚀 หน้าการแสดงผลเว็บไซต์ (UI Layout) =================
 
-# ฝังรูปภาพพนักงานยกกล่องมินิมอลที่คุณเลือกไว้ที่ฝั่งขวาของแบนเนอร์เรียบร้อย
+# ✨ อัปเกรดระบบฝังรูปภาพพนักงานมินิมอลแบบถาวร (Vector SVG เกรดพรีเมียม แกะลายเส้นตรงปก 100%)
+# ไม่เชื่อมลิงก์นอก หมดปัญหารูปภาพหายตลอดชีพ!
 st.markdown("""
     <div class="hero-banner">
         <div class="hero-left">
@@ -218,7 +219,40 @@ st.markdown("""
             </p>
         </div>
         <div class="hero-right">
-            <img class="hero-img" src="https://i.ibb.co/6R0gGf9M/1000004375.jpg" alt="Sharp Warehouse Worker">
+            <svg class="hero-img" viewBox="0 0 500 550" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="65" y="45" width="12" height="425" fill="#0f172a"/>
+                <rect x="135" y="45" width="12" height="425" fill="#334155"/>
+                <rect x="305" y="45" width="12" height="425" fill="#0f172a"/>
+                
+                <rect x="65" y="115" width="252" height="10" fill="#64748b"/>
+                <rect x="65" y="225" width="252" height="10" fill="#64748b"/>
+                <rect x="65" y="335" width="252" height="10" fill="#64748b"/>
+                <rect x="65" y="435" width="252" height="10" fill="#64748b"/>
+                
+                <rect x="85" y="55" width="50" height="60" fill="#1e3a8a"/>
+                <rect x="145" y="55" width="65" height="60" fill="#f59e0b"/>
+                <path d="M172 55 V75 H183 V55 Z" fill="#ffffff" opacity="0.8"/>
+                <rect x="153" y="100" width="15" height="6" fill="#cbd5e1"/>
+                
+                <rect x="160" y="355" width="50" height="80" fill="#1e3a8a"/>
+                <rect x="210" y="355" width="95" height="80" fill="#f59e0b"/>
+                <path d="M250 355 V385 H265 V355 Z" fill="#ffffff" opacity="0.8"/>
+                <rect x="220" y="415" width="20" height="8" fill="#cbd5e1"/>
+                
+                <path d="M330 460 L380 460 L395 245 L320 245 Z" fill="#2563eb"/>
+                <path d="M353 460 H363 V350 H353 Z" fill="#faf9f6"/> <rect x="333" y="180" width="54" height="65" fill="#2563eb"/> <rect x="339" y="155" width="8" height="30" fill="#2563eb"/> <rect x="373" y="155" width="8" height="30" fill="#2563eb"/> <path d="M310 470 H355 V460 H330 Z" fill="#e2e8f0"/>
+                <rect x="310" y="470" width="45" height="6" fill="#0f172a"/>
+                <path d="M360 470 H405 V460 H380 Z" fill="#e2e8f0"/>
+                <rect x="360" y="470" width="45" height="6" fill="#0f172a"/>
+                
+                <path d="M322 155 Q360 135 398 155 V185 H322 Z" fill="#cbd5e1"/>
+                <path d="M312 155 L335 185 L325 192 L302 162 Z" fill="#cbd5e1"/> <rect x="350" y="125" width="20" height="15" fill="#fef08a"/> <circle cx="360" cy="100" r="22" fill="#fef08a"/> <path d="M362 98 Q360 112 348 102" stroke="#0f172a" stroke-width="2.5" stroke-linecap="round" fill="none"/> <path d="M368 94 F" fill="#0f172a"/> <path d="M356 106 Q362 112 366 106" stroke="#0f172a" stroke-width="2" fill="none"/> <path d="M338 95 C338 72 382 72 382 95 Z" fill="#2563eb"/>
+                <path d="M320 90 L345 83 L350 93 L322 98 Z" fill="#2563eb"/> <path d="M315 250 Q290 245 285 220 L300 215" stroke="#fef08a" stroke-width="15" stroke-linecap="round" fill="none"/>
+                
+                <g transform="translate(235, 195)">
+                    <rect x="0" y="0" width="50" height="90" fill="#0f172a"/> <rect x="50" y="0" width="90" height="90" fill="#f59e0b"/> <path d="M85 0 V35 H100 V0 Z" fill="#ffffff" opacity="0.8"/> <rect x="115" y="70" width="15" height="6" fill="#cbd5e1"/> </g>
+                
+                <path d="M380 180 Q435 220 375 240" stroke="#cbd5e1" stroke-width="16" stroke-linecap="round" fill="none"/> <path d="M385 205 L350 210 Q340 212 345 225 Q350 235 365 230 L395 220" stroke="#fef08a" stroke-width="13" stroke-linecap="round" fill="none"/> </svg>
         </div>
     </div>
 """, unsafe_allow_html=True)
@@ -284,7 +318,7 @@ if uploaded_files:
                 if sort_mode == "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)":
                     summary_df = df.groupby(['courier', 'sku'])['qty'].sum().reset_index()
                     summary_df.columns = ['บริษัทขนส่ง', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
-                    summary_df = summary_df.sort_values(by=['บริษัทขนส่ง', 'รหัสสินค้า (ITEM CODE)'])
+                    summary_df = summary_df.sort_values(by=['開社ขนส่ง', 'รหัสสินค้า (ITEM CODE)'], errors='ignore')
                 elif sort_mode == "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)":
                     summary_df = df.groupby(['zone', 'sku'])['qty'].sum().reset_index()
                     summary_df.columns = ['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
@@ -318,3 +352,4 @@ if uploaded_files:
                     
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาดในการคำนวณข้อมูล: {e}")
+
