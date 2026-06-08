@@ -7,16 +7,13 @@ import pandas as pd
 # 1. ตั้งค่าหน้าเว็บให้คลีนและกว้างเต็มจอ
 st.set_page_config(page_title="Sharp Bill Sorter", page_icon="📦", layout="wide")
 
-# ================= 🎨 CSS ปรับแต่งกล่องสรุปและปุ่มในระบบคลังให้ดูโมเดิร์น =================
+# ================= 🎨 CSS ปรับแต่งดีไซน์ =================
 st.markdown("""
     <style>
-    /* ตั้งค่าฟอนต์และพื้นหลังหลักให้เป็นโทนคลีน-โมเดิร์น */
     html, body, [data-testid="stAppViewContainer"] {
         background-color: #faf9f6 !important;
         color: #1e293b;
     }
-    
-    /* ตกแต่งตารางสรุปสถิติภาพรวม */
     div[data-testid="stMetric"] {
         background-color: #ffffff;
         padding: 16px 20px;
@@ -27,7 +24,7 @@ st.markdown("""
     div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #64748b !important; font-weight: bold !important; }
     div[data-testid="stMetricValue"] { font-size: 24px !important; font-weight: bold !important; color: #1e293b !important; }
     
-    /* ตกแต่งปุ่มดำเนินการสีเขียวสดเด่นชัด */
+    /* ตกแต่งปุ่มดำเนินการ */
     div.stButton > button:first-child {
         background-color: #10b981 !important;
         color: white !important;
@@ -42,15 +39,12 @@ st.markdown("""
         background-color: #059669 !important;
     }
     
-    /* ปรับแต่งกล่อง File Uploader */
     div[data-testid="stFileUploader"] {
         background-color: #ffffff;
         border: 2px dashed #e5dec9;
         border-radius: 12px;
         padding: 20px;
     }
-    
-    /* สำหรับปรับแต่งการแสดงผลบนจอมือถือ */
     @media (max-width: 768px) {
         .block-container { padding: 1rem 0.5rem !important; }
         div[data-testid="stMetric"] { margin-bottom: 8px !important; width: 100% !important; }
@@ -59,7 +53,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- ฟังก์ชันหลักดึงและคัดแยกข้อมูลบิล (Core Logic) ---
+# --- ฟังก์ชันหลักดึงและคัดแยกข้อมูลบิล ---
 def detect_courier(track_no, source):
     if not track_no or track_no == "Unknown": return source
     t = track_no.upper()
@@ -131,27 +125,26 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
     
     return output_pdf, all_pages_data
 
-# ================= 🚀 หน้าการแสดงผลเว็บไซต์ (UI Layout) =================
+# ================= 🚀 หน้าการแสดงผลเว็บไซต์ (แก้ไขให้สมบูรณ์) =================
 
-# ใช้ระบบคอลัมน์ของ Streamlit แท้ ๆ ในการจัดวางแบนเนอร์ ปลอดภัยจากตัวอักษรตกขอบ
-header_box = st.container()
-with header_box:
-    # สร้างพื้นหลังจำลองสไตล์กล่องแบนเนอร์อบอุ่น
-    st.markdown('<div style="background-color: #f4efe6; padding: 30px; border-radius: 20px; border: 1px solid #e5dec9; margin-bottom: 25px;">', unsafe_allow_html=True)
-    
-    col_left, col_right = st.columns([2, 1])
-    
-    with col_left:
-        st.markdown("<h1 style='font-size: 3.5rem; font-weight: 900; margin-bottom: 10px; color: #1a1a1a;'>Sharp Bill Sorter</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='font-size: 1.2rem; color: #4a4a4a; line-height: 1.5;'>ระบบจัดเรียงบิลใบจัดสินค้าและผสานไฟล์อัจฉริยะ เลือกโหมดการคัดจัดเรียงบิลหน้างานได้ตามต้องการ</p>", unsafe_allow_html=True)
-        
-    with col_right:
-        # ดึงภาพพนักงานยกกล่องจัดคลังสินค้าด้วยฟังก์ชันรูปภาพแท้ของ Streamlit มั่นใจได้ว่าแสดงผลถูกต้องทุกอุปกรณ์
-        st.image("https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?q=80&w=400&auto=format&fit=crop", width=220, use_container_width=False)
-        
-    st.markdown('</div>', unsafe_allow_html=True)
+st.markdown("<br>", unsafe_allow_html=True) # เว้นที่ว่างด้านบนนิดหน่อยให้ดูโปร่ง
 
-# ส่วนช่องกรอกและปุ่มทำงานหลัก
+col_left, col_right = st.columns([2, 1])
+
+with col_left:
+    st.markdown("<h1 style='font-size: 3.5rem; font-weight: 900; margin-bottom: 5px; color: #1a1a1a;'>Sharp Bill Sorter</h1>", unsafe_allow_html=True)
+    st.markdown("<p style='font-size: 1.1rem; color: #4a4a4a;'>ระบบจัดเรียงบิลใบจัดสินค้าและผสานไฟล์อัจฉริยะ เลือกโหมดการคัดจัดเรียงบิลหน้างานได้ตามต้องการ</p>", unsafe_allow_html=True)
+
+with col_right:
+    # ลองดึงรูป logo.jpg ใน GitHub ถ้าหาไม่เจอจะใช้รูประบบคลังสินค้า 3D แทน
+    try:
+        st.image("logo.jpg", use_container_width=True)
+    except:
+        st.image("https://img.freepik.com/free-vector/isometric-warehouse-horizontal-illustration_1284-57223.jpg", use_container_width=True)
+
+st.markdown("---")
+
+# ส่วนทำงานหลัก
 st.subheader("⚙️ ขั้นตอนที่ 1: เลือกโหมดการคัดแยกเอกสาร")
 sort_mode = st.radio(
     "ระบบจะเรียงบิลตามเงื่อนไขที่คุณเลือกทันที:",
@@ -207,7 +200,6 @@ if uploaded_files:
                 
                 st.markdown("##")
                 
-                # ================= ตารางสรุปยอดหยิบรวม (Picking Summary) =================
                 st.write("**📝 ใบสรุปยอดสินค้าที่ต้องหยิบประจำรอบ (Picking List)**")
                 if sort_mode == "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)":
                     summary_df = df.groupby(['courier', 'sku'])['qty'].sum().reset_index()
@@ -225,7 +217,6 @@ if uploaded_files:
                 
                 st.markdown("---")
                 
-                # ================= ช่องค้นหาตำแหน่งหน้าบิล =================
                 st.write("**🔍 ค้นหาออเดอร์ด่วนและตรวจสอบหน้าเอกสาร**")
                 display_df = df.copy()
                 display_df['หน้าใหม่'] = display_df.index + 1
