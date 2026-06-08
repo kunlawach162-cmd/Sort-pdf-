@@ -5,52 +5,50 @@ import re
 import io
 import pandas as pd
 
-# ตั้งค่าหน้าเว็บให้คลีนและกว้างเต็มจอตามเทมเพลต
+# 1. ตั้งค่าหน้าเว็บให้คลีนและกว้างเต็มจอ (สไตล์แดชบอร์ดสากล)
 st.set_page_config(page_title="Sharp Bill Sorter", page_icon="📦", layout="wide")
 
-# ================= 🎨 CSS ตกแต่งหน้าตาเว็บตามเทมเพลตที่คุณส่งมา =================
+# 2. ปรับแต่งดีไซน์ด้วย CSS ขั้นสูง เพื่อหน้าตาที่สวยงามและใช้งานง่ายที่สุด
 st.markdown("""
     <style>
-    /* ตั้งค่าฟอนต์และความสะอาดของหน้าเว็บ */
+    /* ตั้งค่าฟอนต์และพื้นหลังสีคลีน */
     html, body, [data-testid="stAppViewContainer"] {
         background-color: #ffffff;
-        color: #334155;
+        color: #1e293b;
     }
     
-    /* ตกแต่งกล่องสถิติภาพรวม (Metrics) ให้ดูโมเดิร์น */
+    /* ดีไซน์กล่องสถิติภาพรวม (Metrics) ให้เด่นชัด */
     div[data-testid="stMetric"] {
         background-color: #f8fafc;
-        padding: 14px 18px;
-        border-radius: 10px;
+        padding: 18px 24px;
+        border-radius: 12px;
         border: 1px solid #e2e8f0;
-        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
     }
-    div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #64748b !important; font-weight: 600 !important; }
-    div[data-testid="stMetricValue"] { font-size: 22px !important; font-weight: bold !important; color: #0f172a !important; }
+    div[data-testid="stMetricLabel"] { font-size: 14px !important; color: #475569 !important; font-weight: 600 !important; }
+    div[data-testid="stMetricValue"] { font-size: 26px !important; font-weight: bold !important; color: #0f172a !important; }
     
-    /* ตกแต่งปุ่มกดสีเขียวตามเทมเพลต */
+    /* ดีไซน์ปุ่มหลัก (ดาวน์โหลด/เริ่มคำนวณ) ให้สีเขียวสดเด่นสะดุดตา */
     div.stButton > button:first-child {
-        background-color: #10b981 !important;
+        background-color: #059669 !important;
         color: white !important;
+        font-size: 16px !important;
         font-weight: bold !important;
-        border-radius: 6px !important;
+        border-radius: 8px !important;
         border: none !important;
-        padding: 0.6rem 2rem !important;
+        padding: 0.75rem 2.5rem !important;
+        box-shadow: 0 4px 6px -1px rgba(5, 150, 105, 0.2);
+        transition: all 0.2s;
     }
     div.stButton > button:first-child:hover {
-        background-color: #059669 !important;
+        background-color: #047857 !important;
+        transform: translateY(-1px);
     }
     
-    /* ปรับแต่งลักษณะตารางให้อ่านง่ายสไตล์แดชบอร์ด */
-    .stDataFrame, table {
-        border-radius: 8px !important;
-        overflow: hidden !important;
-    }
-    
-    /* สไตล์สำหรับปรับจอมือถืออัตโนมัติ */
+    /* สำหรับปรับจอมือถืออัตโนมัติ */
     @media (max-width: 768px) {
         .block-container { padding: 1rem 0.5rem !important; }
-        div[data-testid="stMetric"] { margin-bottom: 8px !important; width: 100% !important; }
+        div[data-testid="stMetric"] { margin-bottom: 10px !important; width: 100% !important; }
         div[data-testid="column"] { width: 100% !important; flex: 1 1 100% !important; }
     }
     </style>
@@ -111,45 +109,49 @@ def process_pdf_pro(uploaded_file, sort_mode):
     output_pdf.seek(0)
     return output_pdf, pages_data
 
-# --- ส่วนจัดวางเลย์เอาต์หน้าเว็บตามรูปเทมเพลต (UI Layout) ---
+# --- ส่วนจัดวางโครงสร้างเว็บ (UI Layout) ---
+
+# 🖼️ [ส่วนติดตั้งรูปภาพ/โลโก้] 
+# คุณสามารถเปลี่ยนลิงก์ภาพด้านล่างเป็นโลโก้ของคลังสินค้าตัวเองได้เลยครับ
+st.image("https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?q=80&w=600&auto=format&fit=crop", width=250)
+
 st.title("🏢 Sharp Bill Sorter")
-st.caption("ระบบจัดเรียงบิลใบจัดสินค้าและสรุปยอดหยิบรวมอัจฉริยะ")
+st.caption("ระบบจัดการใบจัดสินค้าและสรุปยอดหยิบรวมอัจฉริยะ (Ultimate Edition)")
 st.markdown("---")
 
-# แถบเลือกตั้งค่าโหมดการทำงานไว้ด้านบนสุดให้อ่านง่าย
-st.subheader("⚙️ ขั้นตอนที่ 1: เลือกรูปแบบการเรียงลำดับบิล")
+# การจัดลำดับขั้นตอนการใช้งานให้พนักงานหน้างานเข้าใจง่าย
+st.subheader("⚙️ ขั้นตอนที่ 1: เลือกโหมดการคัดแยกเอกสาร")
 sort_mode = st.radio(
-    "เลือกรูปแบบที่คุณต้องการใช้งาน:",
+    "ระบบจะเรียงบิลตามเงื่อนไขที่คุณเลือกทันที:",
     [
         "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)",
         "🔤 เรียงตามรหัสสินค้าอย่างเดียว (ITEM CODE)",
         "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)"
     ],
     index=0,
-    horizontal=True # ปรับเมนูตัวเลือกให้แผ่แนวนอนเหมือนในรูปเทมเพลต
+    horizontal=True
 )
 
 st.markdown("---")
 
-# กล่องอัปโหลดไฟล์ตรงกลางจอ
-st.subheader("📂 ขั้นตอนที่ 2: อัปโหลดเอกสาร PDF")
-uploaded_file = st.file_uploader("ลากไฟล์บิลใบจัดสินค้ารวมมาวางตรงนี้ หรือคลิกเพื่อเลือกไฟล์", type=["pdf"])
+st.subheader("📂 ขั้นตอนที่ 2: อัปโหลดไฟล์บิลใบจัดสินค้า (PDF)")
+uploaded_file = st.file_uploader("ลากไฟล์ PDF มาวางตรงนี้ หรือคลิกเพื่อเปิดกล่องเลือกไฟล์", type=["pdf"])
 
 if uploaded_file is not None:
-    st.info(f"🗂️ ตรวจพบไฟล์: {uploaded_file.name} พร้อมประมวลผล")
+    st.info(f"🗂️ ตรวจพบไฟล์เรียบร้อย: {uploaded_file.name}")
     
-    if st.button("⚡ เริ่มจัดบิลและสรุปยอดรวม", use_container_width=True):
-        with st.spinner("⏳ ระบบกำลังจัดระเบียบบิลตามเงื่อนไข กรุณารอสักครู่..."):
+    if st.button("⚡ เริ่มประมวลผลข้อมูลและจัดบิลใหม่", use_container_width=True):
+        with st.spinner("⏳ กำลังอ่านเนื้อหาบิลและวิเคราะห์ข้อมูลคลังสินค้า..."):
             try:
                 sorted_pdf, details = process_pdf_pro(uploaded_file, sort_mode)
                 st.balloons()
                 
                 df = pd.DataFrame(details)
-                st.success("🎉 จัดเรียงข้อมูลสำเร็จเรียบร้อย!")
+                st.success("🎉 ระบบได้จัดระเบียบบิลตามเงื่อนไขของคุณเสร็จสิ้น!")
                 
-                # ปุ่มดาวน์โหลดไฟล์สีเขียวขนาดเด่นชัดตรงกลางจอ
+                # ปุ่มดาวน์โหลดเวอร์ชันโดดเด่นสะดุดตาพนักงาน
                 st.download_button(
-                    label="📥 ดาวน์โหลดเอกสาร PDF ที่จัดเรียงบิลใหม่พร้อมพิมพ์",
+                    label="📥 ดาวน์โหลดไฟล์บิล PDF ที่จัดเรียงใหม่ (พิมพ์ออกมาแพ็กของได้เลย)",
                     data=sorted_pdf,
                     file_name=f"sorted_{uploaded_file.name}",
                     mime="application/pdf",
@@ -158,20 +160,20 @@ if uploaded_file is not None:
                 
                 st.markdown("---")
                 
-                # ================= ส่วนกล่องสรุปสถิติตามเทมเพลต =================
-                st.subheader("📊 ขั้นตอนที่ 3: สรุปภาพรวมและตารางหยิบสินค้า")
+                # ================= ส่วนกล่องแดชบอร์ดสรุปผลยอดหยิบ =================
+                st.subheader("📊 ขั้นตอนที่ 3: สรุปยอดรวมสำหรับเดินหยิบสินค้า")
                 shopee_count = len(df[df['source'] == "Shopee 🟠"])
                 laz_count = len(df[df['source'] == "Lazada 🔵"])
                 
                 col1, col2, col3 = st.columns(3)
-                with col1: st.metric("📋 จำนวนบิลทั้งหมด", f"{len(df)} ใบ")
-                with col2: st.metric("🧺 ยอดรวมสินค้าที่ต้องหยิบ", f"{df['qty'].sum()} ชิ้น")
-                with col3: st.metric("🚚 ช่องทางออเดอร์", f"Shopee: {shopee_count} | Lazada: {laz_count}")
+                with col1: st.metric("📋 ใบออเดอร์ทั้งหมดในรอบนี้", f"{len(df)} บิล")
+                with col2: st.metric("🧺 สินค้ารวมที่ต้องหยิบทวน", f"{df['qty'].sum()} ชิ้น")
+                with col3: st.metric("🚚 ยอดแยกตามค่าย", f"Shopee: {shopee_count} | Lazada: {laz_count}")
                 
                 st.markdown("##")
                 
                 # ================= ตารางใบบิลรวมสินค้า (Picking Summary) =================
-                st.write("**📝 รายการสรุปยอดหยิบสินค้าประจำรอบ (Picking List)**")
+                st.write("**📝 ตารางใบสรุปยอดหยิบสินค้ารวมประจำรอบ (Picking List)**")
                 if sort_mode == "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)":
                     summary_df = df.groupby(['courier', 'sku'])['qty'].sum().reset_index()
                     summary_df.columns = ['บริษัทขนส่ง', 'รหัสสินค้า (ITEM CODE)', 'จำนวนที่ต้องหยิบ (ชิ้น)']
@@ -189,15 +191,15 @@ if uploaded_file is not None:
                 
                 st.markdown("---")
                 
-                # ================= ตารางเช็กตำแหน่งหน้าบิลพร้อมช่องค้นหา =================
-                st.write("**🔍 ค้นหาและตรวจสอบตำแหน่งหน้าบิลออเดอร์**")
+                # ================= ตารางเช็กตำแหน่งหน้าพร้อมกล่องเซิร์ชหาข้อมูล =================
+                st.write("**🔍 ช่องค้นหาออเดอร์ด่วนและตรวจสอบตำแหน่งหน้าบิล**")
                 display_df = df.copy()
                 display_df['หน้าใหม่'] = display_df.index + 1
                 display_df['หน้าเดิม'] = display_df['page_index'] + 1
                 display_df = display_df[['หน้าใหม่', 'courier', 'zone', 'sku', 'qty', 'order_id', 'หน้าเดิม']]
                 display_df.columns = ['บิลใบที่ (หน้าใหม่)', 'บริษัทขนส่ง', 'โซนคลัง', 'รหัสสินค้า', 'จำนวน', 'Order ID', 'หน้าเดิมในไฟล์เก่า']
                 
-                search_query = st.text_input("พิมพ์รหัสสินค้า, ชื่อขนส่ง หรือ Order ID เพื่อค้นหาหน้าบิลในตาราง:")
+                search_query = st.text_input("พิมพ์รหัสสินค้า, ชื่อขนส่ง หรือ Order ID เพื่อส่องตำแหน่งหน้าบิลทันที:")
                 if search_query:
                     filtered_df = display_df[
                         display_df['รหัสสินค้า'].str.contains(search_query, case=False, na=False) |
@@ -209,4 +211,4 @@ if uploaded_file is not None:
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
                     
             except Exception as e:
-                st.error(f"เกิดข้อผิดพลาดในการคำนวณข้อมูล: {e}")
+                st.error(f"เกิดข้อผิดพลาดในการประมวลผลระบบ: {e}")
