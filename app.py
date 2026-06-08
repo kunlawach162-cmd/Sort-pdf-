@@ -11,7 +11,6 @@ st.set_page_config(page_title="Smart Picking PRO", page_icon="📦", layout="wid
 # ================= 🎨 CSS ขั้นสูง: ปรับหน้าจออัตโนมัติตามขนาดอุปกรณ์ (Responsive) =================
 st.markdown("""
     <style>
-    /* ตั้งค่ากล่องสถิติเริ่มต้นสำหรับ PC */
     div[data-testid="stMetric"] {
         background-color: #0f172a;
         padding: 16px 20px;
@@ -19,12 +18,8 @@ st.markdown("""
         border-top: 4px solid #3b82f6;
         box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
     }
-    
-    /* 📱 บังคับให้เปลี่ยนสไตล์อัตโนมัติเมื่อเปิดในหน้าจอมือถือ (ขนาดจอเล็กกว่า 768px) */
     @media (max-width: 768px) {
         .block-container { padding-top: 1rem; padding-bottom: 1rem; padding-left: 0.5rem; padding-right: 0.5rem; }
-        
-        /* เปลี่ยนกล่องสถิติให้เป็นสีเข้มแบบแนวตั้งพอดีจอมือถือ ไม่ตกขอบ */
         div[data-testid="stMetric"] {
             background-color: #1e293b;
             padding: 12px 16px;
@@ -36,8 +31,6 @@ st.markdown("""
         }
         div[data-testid="stMetricLabel"] { font-size: 13px !important; color: #94a3b8 !important; }
         div[data-testid="stMetricValue"] { font-size: 20px !important; font-weight: bold !important; color: #f8fafc !important; }
-        
-        /* บังคับให้คอลัมน์แนวนอนแตกแถวลงมาเป็นแนวตั้งบนมือถือ */
         div[data-testid="column"] {
             width: 100% !important;
             flex: 1 1 100% !important;
@@ -45,7 +38,22 @@ st.markdown("""
         }
     }
     </style>
-""", unsafe_allow_html=True) # ✨ แก้ไขเป็น unsafe_allow_html ตรงนี้เรียบร้อยครับ
+""", unsafe_allow_html=True)
+
+# --- ฟังก์ชันวิเคราะห์ค่ายขนส่งจากตัวอักษรของ Track No ---
+def detect_courier(track_no, source):
+    if not track_no or track_no == "Unknown":
+        return source # ถ้าไม่เจอเลขแทร็ก ให้ใช้ชื่อช่องทาง (Shopee/Lazada) แทนค่ายขนส่ง
+        
+    track_upper = track_no.upper()
+    if track_upper.startswith("LEX"):
+        return "Lazada Express (LEX) 🔵"
+    elif track_upper.startswith("TH"):
+        return "SPX Express 🟠"
+    elif track_upper.startswith("KERRY") or track_upper.startswith("SHP"):
+        return "Kerry / Flash 🟡"
+    else:
+        return f"ขนส่งอื่นๆ ({source.split()[0]}) 🚚"
 
 # --- ฟังก์ชันแกะข้อมูลจาก PDF ---
 def extract_data_from_page(text):
@@ -55,12 +63,27 @@ def extract_data_from_page(text):
         'qty': 1,
         'source': 'Unknown',
         'track_no': 'Unknown',
+        'courier': 'Unknown',
         'order_id': 'Unknown'
     }
     if not text:
         return data
         
-    # 1. หา PICK-CODE / โซน
+    # 1. หา Track No เพื่อวิเคราะห์ขนส่ง
+    track_match = re.search(r'Track\s*No\s*:\s*([\w-]+)', text, re.IGNORECASE)
+    if track_match:
+        data['track_no'] = track_match.group(1).strip()
+        
+    # 2. หา Source (Shopee / Lazada)
+    if "Shopee" in text:
+        data['source'] = "Shopee 🟠"
+    elif "Lada" in text or "Lazada" in text:
+        data['source'] = "Lazada 🔵"
+
+    # 3. วิเคราะห์ค่ายขนส่ง
+    data['courier'] = detect_courier(data['track_no'], data['source'])
+
+    # 4. หา PICK-CODE / โซน
     zone_match = re.search(r'\b(G\d+)\b', text)
     if zone_match:
         data['zone'] = zone_match.group(1)
@@ -70,7 +93,7 @@ def extract_data_from_page(text):
                 data['zone'] = line.strip().split()[0]
                 break
         
-    # 2. หา ITEM CODE
+    # 5. หา ITEM CODE
     sku_match = re.search(r'\b\d+-[A-Z]+-[A-Z]+-\d+\b', text)
     if sku_match:
         data['sku'] = sku_match.group(0)
@@ -82,18 +105,12 @@ def extract_data_from_page(text):
                     data['sku'] = m.group(1)
                     break
 
-    # 3. หาจำนวน QTY
+    # 6. หาจำนวน QTY
     qty_match = re.search(r'รวมทั้งสิ้น\s*(\d+)', text)
     if qty_match:
         data['qty'] = int(qty_match.group(1))
 
-    # 4. หา Source (Shopee / Lazada)
-    if "Shopee" in text:
-        data['source'] = "Shopee 🟠"
-    elif "Lada" in text or "Lazada" in text:
-        data['source'] = "Lazada 🔵"
-
-    # 5. หา Order ID
+    # 7. หา Order ID
     order_match = re.search(r'Order ID\s*:\s*([\w-]+)', text, re.IGNORECASE)
     if order_match:
         data['order_id'] = order_match.group(1)
@@ -110,7 +127,11 @@ def process_pdf_pro(uploaded_file, sort_mode):
             page_info['page_index'] = index
             pages_data.append(page_info)
             
-    if sort_mode == "🔤 เรียงตามรหัสสินค้า (ITEM CODE)":
+    # จัดเรียงลำดับตามโหมดตัวเลือกใหม่
+    if sort_mode == "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)":
+        # เรียงตามค่ายขนส่งก่อน แล้วด้านในค่ายขนส่งค่อยเรียงตามรหัสสินค้าจากน้อยไปมาก
+        pages_data.sort(key=lambda x: (x['courier'], x['sku']))
+    elif sort_mode == "🔤 เรียงตามรหัสสินค้าอย่างเดียว (ITEM CODE)":
         pages_data.sort(key=lambda x: x['sku'])
     elif sort_mode == "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)":
         pages_data.sort(key=lambda x: (x['zone'], x['sku']))
@@ -128,15 +149,16 @@ def process_pdf_pro(uploaded_file, sort_mode):
 
 # --- ส่วนแสดงผลหน้าเว็บ (UI) ---
 st.title("📦 Smart Picking PRO")
-st.caption("ระบบจัดเรียงบิลอัตโนมัติเวอร์ชันปรับขนาดตามหน้าจอคอมฯ และมือถือให้อัตโนมัติ")
+st.caption("ระบบจัดเรียงบิลอัจฉริยะ เลือกโหมดการคัดจัดเรียงบิลหน้างานได้ตามต้องการ")
 st.markdown("---")
 
-# เลือกโหมดการเรียงลำดับ
+# เลือกโหมดการเรียงลำดับ (เพิ่มตัวเลือกจัดเรียงตามขนส่ง)
 st.subheader("⚙️ เลือกรูปแบบการเรียงลำดับเอกสาร")
 sort_mode = st.radio(
-    "ต้องการให้ระบบเรียงลำดับหน้าบิลตามอะไร?",
+    "ต้องการให้ระบบจัดเรียงบิลในรูปแบบใด?",
     [
-        "🔤 เรียงตามรหัสสินค้า (ITEM CODE)",
+        "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)",
+        "🔤 เรียงตามรหัสสินค้าอย่างเดียว (ITEM CODE)",
         "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)"
     ],
     index=0
@@ -150,17 +172,17 @@ if uploaded_file is not None:
     st.info(f"🗂️ ไฟล์: {uploaded_file.name}")
     
     if st.button("⚡ เริ่มจัดเรียงและสรุปยอดหยิบ", type="primary", use_container_width=True):
-        with st.spinner("⏳ กำลังคำนวณข้อมูล..."):
+        with st.spinner("⏳ ระบบกำลังคัดแยกขนส่งและคำนวณข้อมูล..."):
             try:
                 sorted_pdf, details = process_pdf_pro(uploaded_file, sort_mode)
                 st.balloons()
                 
                 df = pd.DataFrame(details)
-                st.success("🎉 จัดเรียงสำเร็จ!")
+                st.success("🎉 ทำการจัดเรียงบิลสำเร็จ!")
                 
                 # ปุ่มดาวน์โหลด
                 st.download_button(
-                    label="📥 ดาวน์โหลด PDF ที่จัดเรียงใหม่แล้ว",
+                    label="📥 ดาวน์โหลด PDF ที่จัดเรียงบิลใหม่แล้ว",
                     data=sorted_pdf,
                     file_name=f"sorted_{uploaded_file.name}",
                     mime="application/pdf",
@@ -184,13 +206,18 @@ if uploaded_file is not None:
                 # ================= ส่วนใบบิลรวมสินค้า (Picking Summary) =================
                 st.subheader("📝 ยอดหยิบรวมสินค้า")
                 
-                summary_df = df.groupby(['zone', 'sku'])['qty'].sum().reset_index()
-                summary_df.columns = ['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
-                
-                if sort_mode == "🔤 เรียงตามรหัสสินค้า (ITEM CODE)":
-                    summary_df = summary_df.sort_values(by='รหัสสินค้า (ITEM CODE)')
-                else:
+                if sort_mode == "🚚 เรียงตามขนส่ง -> แล้วเรียงรหัสสินค้า (ITEM CODE)":
+                    summary_df = df.groupby(['courier', 'sku'])['qty'].sum().reset_index()
+                    summary_df.columns = ['บริษัทขนส่ง', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
+                    summary_df = summary_df.sort_values(by=['บริษัทขนส่ง', 'รหัสสินค้า (ITEM CODE)'])
+                elif sort_mode == "📍 เรียงตามโซนคลังสินค้า (PICK-CODE -> รหัสสินค้า)":
+                    summary_df = df.groupby(['zone', 'sku'])['qty'].sum().reset_index()
+                    summary_df.columns = ['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
                     summary_df = summary_df.sort_values(by=['โซน (PICK-CODE)', 'รหัสสินค้า (ITEM CODE)'])
+                else:
+                    summary_df = df.groupby('sku')['qty'].sum().reset_index()
+                    summary_df.columns = ['รหัสสินค้า (ITEM CODE)', 'จำนวน (ชิ้น)']
+                    summary_df = summary_df.sort_values(by='รหัสสินค้า (ITEM CODE)')
                     
                 st.dataframe(summary_df, use_container_width=True, hide_index=True)
                 
@@ -202,14 +229,14 @@ if uploaded_file is not None:
                 display_df = df.copy()
                 display_df['หน้าใหม่'] = display_df.index + 1
                 display_df['หน้าเดิม'] = display_df['page_index'] + 1
-                display_df = display_df[['หน้าใหม่', 'zone', 'sku', 'qty', 'order_id', 'หน้าเดิม']]
-                display_df.columns = ['บิลใบที่', 'โซน', 'รหัสสินค้า', 'จำนวน', 'Order ID', 'หน้าเดิมในไฟล์เก่า']
+                display_df = display_df[['หน้าใหม่', 'courier', 'zone', 'sku', 'qty', 'order_id', 'หน้าเดิม']]
+                display_df.columns = ['บิลใบที่', 'บริษัทขนส่ง', 'โซน', 'รหัสสินค้า', 'จำนวน', 'Order ID', 'หน้าเดิมในไฟล์เก่า']
                 
-                search_query = st.text_input("พิมพ์รหัสสินค้า, โซน หรือ Order ID เพื่อค้นหาหน้า:")
+                search_query = st.text_input("พิมพ์รหัสสินค้า, ชื่อขนส่ง หรือ Order ID เพื่อค้นหาหน้า:")
                 if search_query:
                     filtered_df = display_df[
                         display_df['รหัสสินค้า'].str.contains(search_query, case=False, na=False) |
-                        display_df['โซน'].str.contains(search_query, case=False, na=False) |
+                        display_df['บริษัทขนส่ง'].str.contains(search_query, case=False, na=False) |
                         display_df['Order ID'].str.contains(search_query, case=False, na=False)
                     ]
                     st.dataframe(filtered_df, use_container_width=True, hide_index=True)
@@ -218,3 +245,4 @@ if uploaded_file is not None:
                     
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาด: {e}")
+
