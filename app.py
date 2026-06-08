@@ -1,4 +1,3 @@
-```python
 import streamlit as st
 from pypdf import PdfReader, PdfWriter
 import re
