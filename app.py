@@ -133,6 +133,12 @@ def extract_zone(text):
 
 def extract_order_id(text):
 
+    # ดึงหมายเลขที่ขึ้นต้นด้วย PA ก่อน
+    pa_match = re.search(r'\b(PA[A-Z0-9]+)\b', text, re.IGNORECASE)
+    if pa_match:
+        return pa_match.group(1).strip()
+
+    # ถ้าไม่มี PA ค่อย fallback กลับไปหา Order ID ปกติ
     match = re.search(
         r'Order\s*ID\s*:\s*([A-Z0-9\-]+)',
         text,
@@ -163,11 +169,6 @@ def extract_sku(text):
 
 
 # ================= FIXED QTY =================
-# อ่านจาก format จริง:
-# P 1
-# DX 2
-# GX 1
-
 def extract_qty(text):
 
     lines = text.splitlines()
@@ -264,7 +265,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
     processed_pages = 0
 
-    # อ่านไฟล์
+    # อ่านไฟล์แบบคงความสมบูรณ์ของภาพ
     for file_index, uploaded_file in enumerate(uploaded_files):
 
         file_bytes = uploaded_file.getvalue()
@@ -492,13 +493,6 @@ if uploaded_files:
                     by=["SKU"]
                 )
 
-            # HOT ITEM
-            if "จำนวน" in summary_df.columns:
-
-                summary_df["🔥HOT"] = summary_df["จำนวน"].apply(
-                    lambda x: "🔥" if x >= 10 else ""
-                )
-
             # DOWNLOAD CSV
             csv_data = summary_df.to_csv(
                 index=False
@@ -535,7 +529,8 @@ if uploaded_files:
                     "zone",
                     "sku",
                     "qty",
-                    "order_id"
+                    "order_id",
+                    "track_no" # เพิ่มช่อง tracking
                 ]
             ]
 
@@ -545,11 +540,12 @@ if uploaded_files:
                 "โซน",
                 "SKU",
                 "จำนวน",
-                "Order ID"
+                "Order ID", # ซึ่งตอนนี้ดึงหมายเลข PA มาแสดง
+                "Tracking"
             ]
 
             search = st.text_input(
-                "ค้นหา SKU / Order ID / ขนส่ง"
+                "ค้นหา SKU / Order ID / Tracking / ขนส่ง"
             )
 
             if search:
@@ -568,6 +564,12 @@ if uploaded_files:
                     )
                     |
                     display_df["ขนส่ง"].astype(str).str.contains(
+                        search,
+                        case=False,
+                        na=False
+                    )
+                    |
+                    display_df["Tracking"].astype(str).str.contains(
                         search,
                         case=False,
                         na=False
