@@ -134,9 +134,13 @@ def extract_zone(text):
 def extract_order_id(text):
 
     # ดึงหมายเลขที่ขึ้นต้นด้วย PA ก่อน
-    pa_match = re.search(r'\b(PA[A-Z0-9]+)\b', text, re.IGNORECASE)
+    pa_match = re.search(r'(PA[A-Z0-9]+)', text, re.IGNORECASE)
     if pa_match:
-        return pa_match.group(1).strip()
+        result = pa_match.group(1)
+        # ตัดคำว่า Order ที่บังเอิญติดมาด้วยออกไป
+        if result.lower().endswith("order"):
+            result = result[:-5]
+        return result
 
     # ถ้าไม่มี PA ค่อย fallback กลับไปหา Order ID ปกติ
     match = re.search(
@@ -251,26 +255,31 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
     writer = PdfWriter()
 
     total_pages = 0
+    
+    # สำคัญมาก: เก็บ Stream ไว้ไม่ให้โดนระบบเคลียร์แรมทิ้ง 
+    # ป้องกันปัญหารูปภาพ บาร์โค้ด หายตอนเซฟเป็น PDF ใหม่
+    pdf_streams = []
+    readers = []
 
-    # นับหน้าทั้งหมด
-    for uploaded_file in uploaded_files:
+    # โหลดไฟล์และอ่านหน้าทั้งหมด
+    for file_index, uploaded_file in enumerate(uploaded_files):
 
         file_bytes = uploaded_file.getvalue()
+        
+        stream = io.BytesIO(file_bytes)
+        pdf_streams.append(stream)
 
-        reader = PdfReader(io.BytesIO(file_bytes))
-
+        reader = PdfReader(stream)
+        readers.append((file_index, reader))
+        
         total_pages += len(reader.pages)
 
     progress_bar = st.progress(0)
 
     processed_pages = 0
 
-    # อ่านไฟล์แบบคงความสมบูรณ์ของภาพ
-    for file_index, uploaded_file in enumerate(uploaded_files):
-
-        file_bytes = uploaded_file.getvalue()
-
-        reader = PdfReader(io.BytesIO(file_bytes))
+    # ดึงข้อมูลจากแต่ละหน้า
+    for file_index, reader in readers:
 
         for page in reader.pages:
 
@@ -525,23 +534,23 @@ if uploaded_files:
             display_df = display_df[
                 [
                     "หน้าใหม่",
+                    "track_no", 
                     "courier",
                     "zone",
                     "sku",
                     "qty",
-                    "order_id",
-                    "track_no" # เพิ่มช่อง tracking
+                    "order_id"
                 ]
             ]
 
             display_df.columns = [
                 "หน้า",
+                "Tracking",
                 "ขนส่ง",
                 "โซน",
                 "SKU",
                 "จำนวน",
-                "Order ID", # ซึ่งตอนนี้ดึงหมายเลข PA มาแสดง
-                "Tracking"
+                "Order ID"
             ]
 
             search = st.text_input(
