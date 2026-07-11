@@ -89,6 +89,8 @@ def detect_courier(track_no, source):
     if t.startswith("LEX"):
         return "Lazada Express (LEX) 🔵"
 
+    # ★ หมายเหตุ: เลขที่ขึ้นต้น TH อาจเป็น Flash ได้ด้วย
+    # ถ้าพบว่าจัดผิดบ่อย ให้เทียบ prefix กับบิลจริงแล้วปรับเงื่อนไขตรงนี้
     elif t.startswith("SPX") or t.startswith("TH"):
         return "SPX Express 🟠"
 
@@ -129,6 +131,17 @@ def extract_zone(text):
         return match.group(1)
 
     return "Unknown"
+
+
+# ★ FIX 2: แปลงโซนเป็นตัวเลข เพื่อเรียงแบบธรรมชาติ (G2 มาก่อน G10)
+def zone_sort_key(zone):
+
+    match = re.match(r'G(\d+)$', str(zone))
+
+    if match:
+        return int(match.group(1))
+
+    return 999999  # Unknown / อื่นๆ ไปอยู่ท้ายสุด
 
 
 def extract_order_id(text):
@@ -172,7 +185,6 @@ def extract_sku(text):
     return "ZZZZZZ"
 
 
-# ================= FIXED QTY =================
 def extract_qty(text):
 
     lines = text.splitlines()
@@ -255,8 +267,11 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
     writer = PdfWriter()
 
     total_pages = 0
-    
-    # สำคัญมาก: เก็บ Stream ไว้ไม่ให้โดนระบบเคลียร์แรมทิ้ง 
+
+    # ★ FIX 3: นับหน้าที่อ่านข้อความไม่ได้ (เช่น ภาพสแกน)
+    unreadable_pages = 0
+
+    # สำคัญมาก: เก็บ Stream ไว้ไม่ให้โดนระบบเคลียร์แรมทิ้ง
     # ป้องกันปัญหารูปภาพ บาร์โค้ด หายตอนเซฟเป็น PDF ใหม่
     pdf_streams = []
     readers = []
@@ -265,13 +280,13 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
     for file_index, uploaded_file in enumerate(uploaded_files):
 
         file_bytes = uploaded_file.getvalue()
-        
+
         stream = io.BytesIO(file_bytes)
         pdf_streams.append(stream)
 
         reader = PdfReader(stream)
         readers.append((file_index, reader))
-        
+
         total_pages += len(reader.pages)
 
     progress_bar = st.progress(0)
@@ -285,6 +300,9 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
             text = page.extract_text() or ""
 
+            if not text.strip():
+                unreadable_pages += 1
+
             page_info = extract_data_from_page(text)
 
             page_info["file_index"] = file_index
@@ -295,17 +313,17 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
             processed_pages += 1
 
-            progress = processed_pages / total_pages
+            progress = processed_pages / max(total_pages, 1)
 
             progress_bar.progress(progress)
 
-    # SORT
+    # SORT (★ FIX 2: โซนเรียงตามตัวเลขจริง ไม่ใช่ตามตัวอักษร)
     if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
 
         all_pages_data.sort(
             key=lambda x: (
                 x["courier"],
-                x["zone"],
+                zone_sort_key(x["zone"]),
                 x["sku"]
             )
         )
@@ -314,7 +332,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
         all_pages_data.sort(
             key=lambda x: (
-                x["zone"],
+                zone_sort_key(x["zone"]),
                 x["sku"]
             )
         )
@@ -338,7 +356,15 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
     output_pdf.seek(0)
 
-    return output_pdf, all_pages_data
+    # เอา page ref ออกก่อนเก็บลง session_state
+    # (object หนักและผูกอยู่กับ reader ที่จะถูกเคลียร์ทิ้ง)
+    for page_info in all_pages_data:
+        page_info.pop("reader_page_ref", None)
+
+    # ★ FIX จุดย่อย: เคลียร์แถบ progress ไม่ให้ค้างที่ 100%
+    progress_bar.empty()
+
+    return output_pdf, all_pages_data, unreadable_pages
 
 
 # ================= HEADER =================
@@ -394,214 +420,272 @@ if uploaded_files:
 
             with st.spinner("⏳ กำลังประมวลผล..."):
 
-                sorted_pdf, details = process_multiple_pdfs(
+                sorted_pdf, details, unreadable = process_multiple_pdfs(
                     uploaded_files,
                     sort_mode
                 )
 
-            df = pd.DataFrame(details)
-
-            st.success("🎉 จัดบิลสำเร็จ")
-
-            # ================= METRICS =================
-
-            total_orders = len(df)
-
-            total_qty = df["qty"].sum()
-
-            shopee_count = len(
-                df[df["source"] == "Shopee 🟠"]
-            )
-
-            lazada_count = len(
-                df[df["source"] == "Lazada 🔵"]
-            )
-
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                st.metric(
-                    "📋 จำนวนออเดอร์",
-                    f"{total_orders} บิล"
-                )
-
-            with col2:
-                st.metric(
-                    "📦 จำนวนสินค้ารวม",
-                    f"{total_qty} ชิ้น"
-                )
-
-            with col3:
-                st.metric(
-                    "🛒 Marketplace",
-                    f"Shopee {shopee_count} | Lazada {lazada_count}"
-                )
-
-            st.markdown("---")
-
-            # ================= DOWNLOAD PDF =================
-
-            st.download_button(
-                label="📥 ดาวน์โหลด PDF ที่จัดเรียงแล้ว",
-                data=sorted_pdf,
-                file_name="sharp_sorted_bills.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                type="primary"
-            )
-
-            # ================= SUMMARY =================
-
-            st.subheader("📊 Picking Summary")
-
-            if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
-
-                summary_df = df.groupby(
-                    ["courier", "zone", "sku"]
-                )["qty"].sum().reset_index()
-
-                summary_df.columns = [
-                    "ขนส่ง",
-                    "โซน",
-                    "SKU",
-                    "จำนวน"
-                ]
-
-                summary_df = summary_df.sort_values(
-                    by=["ขนส่ง", "โซน", "SKU"]
-                )
-
-            elif sort_mode == "📦 เรียงตามโซน -> SKU":
-
-                summary_df = df.groupby(
-                    ["zone", "sku"]
-                )["qty"].sum().reset_index()
-
-                summary_df.columns = [
-                    "โซน",
-                    "SKU",
-                    "จำนวน"
-                ]
-
-                summary_df = summary_df.sort_values(
-                    by=["โซน", "SKU"]
-                )
-
-            else:
-
-                summary_df = df.groupby(
-                    ["sku"]
-                )["qty"].sum().reset_index()
-
-                summary_df.columns = [
-                    "SKU",
-                    "จำนวน"
-                ]
-
-                summary_df = summary_df.sort_values(
-                    by=["SKU"]
-                )
-
-            # DOWNLOAD CSV
-            csv_data = summary_df.to_csv(
-                index=False
-            ).encode("utf-8-sig")
-
-            st.download_button(
-                label="📊 ดาวน์โหลด Picking List (CSV)",
-                data=csv_data,
-                file_name="picking_summary.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-
-            st.dataframe(
-                summary_df,
-                use_container_width=True,
-                hide_index=True
-            )
-
-            st.markdown("---")
-
-            # ================= SEARCH =================
-
-            st.subheader("🔍 ค้นหาออเดอร์")
-
-            display_df = df.copy()
-
-            display_df["หน้าใหม่"] = display_df.index + 1
-
-            display_df = display_df[
-                [
-                    "หน้าใหม่",
-                    "track_no", 
-                    "courier",
-                    "zone",
-                    "sku",
-                    "qty",
-                    "order_id"
-                ]
-            ]
-
-            display_df.columns = [
-                "หน้า",
-                "Tracking",
-                "ขนส่ง",
-                "โซน",
-                "SKU",
-                "จำนวน",
-                "Order ID"
-            ]
-
-            search = st.text_input(
-                "ค้นหา SKU / Order ID / Tracking / ขนส่ง"
-            )
-
-            if search:
-
-                filtered = display_df[
-                    display_df["SKU"].astype(str).str.contains(
-                        search,
-                        case=False,
-                        na=False
-                    )
-                    |
-                    display_df["Order ID"].astype(str).str.contains(
-                        search,
-                        case=False,
-                        na=False
-                    )
-                    |
-                    display_df["ขนส่ง"].astype(str).str.contains(
-                        search,
-                        case=False,
-                        na=False
-                    )
-                    |
-                    display_df["Tracking"].astype(str).str.contains(
-                        search,
-                        case=False,
-                        na=False
-                    )
-                ]
-
-                st.dataframe(
-                    filtered,
-                    use_container_width=True,
-                    hide_index=True
-                )
-
-            else:
-
-                st.dataframe(
-                    display_df,
-                    use_container_width=True,
-                    hide_index=True
-                )
+            # ★ FIX 1: เก็บผลลัพธ์ลง session_state
+            # จะได้ไม่หายตอนกดดาวน์โหลด / พิมพ์ค้นหา (Streamlit rerun)
+            st.session_state.result = {
+                "pdf_bytes": sorted_pdf.getvalue(),
+                "df": pd.DataFrame(details),
+                "sort_mode": sort_mode,
+                "unreadable": unreadable
+            }
 
         except Exception as e:
 
+            st.session_state.pop("result", None)
+
             st.error(f"❌ เกิดข้อผิดพลาด : {e}")
+
+# ================= RESULTS =================
+# ★ FIX 1: ส่วนแสดงผลอยู่นอกปุ่ม อ่านจาก session_state
+# ทำให้ตาราง / ปุ่มดาวน์โหลด / ช่องค้นหา อยู่ครบทุกครั้งที่หน้า rerun
+
+if "result" in st.session_state:
+
+    result = st.session_state.result
+
+    df = result["df"]
+
+    # ใช้โหมด ณ ตอนที่กดจัดบิล (ไม่ใช่ค่าปัจจุบันของ radio)
+    result_mode = result["sort_mode"]
+
+    st.success("🎉 จัดบิลสำเร็จ")
+
+    # ★ FIX 3: เตือนหน้าที่อ่านข้อความไม่ได้
+    if result["unreadable"] > 0:
+
+        st.warning(
+            f"⚠️ มี {result['unreadable']} หน้า ที่อ่านข้อความไม่ได้ "
+            f"(อาจเป็นภาพสแกน) ข้อมูลจะขึ้นเป็น Unknown "
+            f"— ลองค้นหาคำว่า Unknown ในตารางด้านล่าง แล้วเช็คด้วยมืออีกที"
+        )
+
+    # ★ FIX จุดย่อย: เตือน Tracking ซ้ำ (กันบิลพิมพ์ซ้ำ / แพ็คซ้ำ)
+    dup_mask = (
+        (df["track_no"] != "Unknown")
+        & df["track_no"].duplicated(keep=False)
+    )
+
+    dup_tracks = df.loc[dup_mask, "track_no"].unique()
+
+    if len(dup_tracks) > 0:
+
+        show = ", ".join(dup_tracks[:5])
+
+        more = (
+            f" และอีก {len(dup_tracks) - 5} เลข"
+            if len(dup_tracks) > 5
+            else ""
+        )
+
+        st.warning(
+            f"⚠️ พบเลข Tracking ซ้ำ: {show}{more} "
+            f"— อาจเป็นบิลพิมพ์ซ้ำ ระวังแพ็คซ้ำ"
+        )
+
+    # ================= METRICS =================
+
+    total_orders = len(df)
+
+    total_qty = int(df["qty"].sum())
+
+    shopee_count = len(
+        df[df["source"] == "Shopee 🟠"]
+    )
+
+    lazada_count = len(
+        df[df["source"] == "Lazada 🔵"]
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.metric(
+            "📋 จำนวนออเดอร์",
+            f"{total_orders} บิล"
+        )
+
+    with col2:
+        st.metric(
+            "📦 จำนวนสินค้ารวม",
+            f"{total_qty} ชิ้น"
+        )
+
+    with col3:
+        st.metric(
+            "🛒 Marketplace",
+            f"Shopee {shopee_count} | Lazada {lazada_count}"
+        )
+
+    st.markdown("---")
+
+    # ================= DOWNLOAD PDF =================
+
+    st.download_button(
+        label="📥 ดาวน์โหลด PDF ที่จัดเรียงแล้ว",
+        data=result["pdf_bytes"],
+        file_name="sharp_sorted_bills.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+        type="primary"
+    )
+
+    # ================= SUMMARY =================
+
+    st.subheader("📊 Picking Summary")
+
+    if result_mode == "🚚 เรียงตามขนส่ง -> SKU":
+
+        summary_df = df.groupby(
+            ["courier", "zone", "sku"]
+        )["qty"].sum().reset_index()
+
+        summary_df.columns = [
+            "ขนส่ง",
+            "โซน",
+            "SKU",
+            "จำนวน"
+        ]
+
+        # ★ FIX 2: เรียงโซนตามตัวเลขจริงใน summary ด้วย
+        summary_df = summary_df.sort_values(
+            by=["ขนส่ง", "โซน", "SKU"],
+            key=lambda s: s.map(zone_sort_key) if s.name == "โซน" else s
+        )
+
+    elif result_mode == "📦 เรียงตามโซน -> SKU":
+
+        summary_df = df.groupby(
+            ["zone", "sku"]
+        )["qty"].sum().reset_index()
+
+        summary_df.columns = [
+            "โซน",
+            "SKU",
+            "จำนวน"
+        ]
+
+        summary_df = summary_df.sort_values(
+            by=["โซน", "SKU"],
+            key=lambda s: s.map(zone_sort_key) if s.name == "โซน" else s
+        )
+
+    else:
+
+        summary_df = df.groupby(
+            ["sku"]
+        )["qty"].sum().reset_index()
+
+        summary_df.columns = [
+            "SKU",
+            "จำนวน"
+        ]
+
+        summary_df = summary_df.sort_values(
+            by=["SKU"]
+        )
+
+    # DOWNLOAD CSV
+    csv_data = summary_df.to_csv(
+        index=False
+    ).encode("utf-8-sig")
+
+    st.download_button(
+        label="📊 ดาวน์โหลด Picking List (CSV)",
+        data=csv_data,
+        file_name="picking_summary.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+
+    st.dataframe(
+        summary_df,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.markdown("---")
+
+    # ================= SEARCH =================
+
+    st.subheader("🔍 ค้นหาออเดอร์")
+
+    display_df = df.copy().reset_index(drop=True)
+
+    display_df["หน้าใหม่"] = display_df.index + 1
+
+    display_df = display_df[
+        [
+            "หน้าใหม่",
+            "track_no",
+            "courier",
+            "zone",
+            "sku",
+            "qty",
+            "order_id"
+        ]
+    ]
+
+    display_df.columns = [
+        "หน้า",
+        "Tracking",
+        "ขนส่ง",
+        "โซน",
+        "SKU",
+        "จำนวน",
+        "Order ID"
+    ]
+
+    search = st.text_input(
+        "ค้นหา SKU / Order ID / Tracking / ขนส่ง",
+        key="search_box"
+    )
+
+    if search:
+
+        filtered = display_df[
+            display_df["SKU"].astype(str).str.contains(
+                search,
+                case=False,
+                na=False
+            )
+            |
+            display_df["Order ID"].astype(str).str.contains(
+                search,
+                case=False,
+                na=False
+            )
+            |
+            display_df["ขนส่ง"].astype(str).str.contains(
+                search,
+                case=False,
+                na=False
+            )
+            |
+            display_df["Tracking"].astype(str).str.contains(
+                search,
+                case=False,
+                na=False
+            )
+        ]
+
+        st.dataframe(
+            filtered,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    else:
+
+        st.dataframe(
+            display_df,
+            use_container_width=True,
+            hide_index=True
+        )
 
 # ================= RESET =================
 
@@ -618,4 +702,8 @@ with col2:
 
         st.session_state.uploader_key += 1
 
+        # ★ FIX 1: เคลียร์ผลลัพธ์เก่าด้วย
+        st.session_state.pop("result", None)
+
         st.rerun()
+
