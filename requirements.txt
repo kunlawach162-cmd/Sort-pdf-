@@ -1,5 +1,8 @@
 streamlit
+pandas
+numpy
+pymupdf
 pdfplumber
 pypdf
-pymupdf
-pandas
+pdfminer-six
+pypdfium2
