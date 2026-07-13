@@ -413,7 +413,7 @@ if uploaded_files:
     if st.button(
         "⚡ เริ่มจัดบิล",
         type="primary",
-        use_container_width=True
+        width='stretch'
     ):
 
         try:
@@ -530,7 +530,7 @@ if "result" in st.session_state:
         data=result["pdf_bytes"],
         file_name="sharp_sorted_bills.pdf",
         mime="application/pdf",
-        use_container_width=True,
+        width='stretch',
         type="primary"
     )
 
@@ -599,12 +599,12 @@ if "result" in st.session_state:
         data=csv_data,
         file_name="picking_summary.csv",
         mime="text/csv",
-        use_container_width=True
+        width='stretch'
     )
 
     st.dataframe(
         summary_df,
-        use_container_width=True,
+        width='stretch',
         hide_index=True
     )
 
@@ -675,7 +675,7 @@ if "result" in st.session_state:
 
         st.dataframe(
             filtered,
-            use_container_width=True,
+            width='stretch',
             hide_index=True
         )
 
@@ -683,7 +683,7 @@ if "result" in st.session_state:
 
         st.dataframe(
             display_df,
-            use_container_width=True,
+            width='stretch',
             hide_index=True
         )
 
@@ -697,7 +697,7 @@ with col2:
 
     if st.button(
         "🔄 เริ่มรอบใหม่",
-        use_container_width=True
+        width='stretch'
     ):
 
         st.session_state.uploader_key += 1
@@ -706,4 +706,3 @@ with col2:
         st.session_state.pop("result", None)
 
         st.rerun()
-
