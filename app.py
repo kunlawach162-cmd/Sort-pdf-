@@ -3,6 +3,7 @@ from pypdf import PdfReader, PdfWriter
 import pandas as pd
 import re
 import io
+import os
 
 # นำเข้า ReportLab สำหรับสร้างลายน้ำ
 from reportlab.pdfgen import canvas
@@ -59,6 +60,25 @@ div[data-testid="stFileUploader"] {
 }
 </style>
 """, unsafe_allow_html=True)
+
+# ================= BULKY SKU FILE LOADER =================
+
+def load_bulky_skus_from_file(filename="bulky_skus.txt"):
+    """
+    อ่านไฟล์ bulky_skus.txt จากระบบอัตโนมัติ
+    """
+    if os.path.exists(filename):
+        try:
+            with open(filename, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+            # ลบเว้นวรรค/บรรทัดว่าง
+            skus = [s.strip() for s in lines if s.strip()]
+            return skus, True
+        except Exception as e:
+            st.error(f"⚠️ ไม่สามารถอ่านไฟล์ {filename} ได้: {e}")
+            return [], False
+    return [], False
+
 
 # ================= WATERMARK CREATOR =================
 
@@ -201,16 +221,17 @@ def extract_grand_total_qty(text):
 
 def is_bulky_sku(skus, bulky_list):
     """
-    ตรวจสอบว่า SKU ในบิลตรงกับสินค้า Bulky (ไม่สนขีด/เว้นวรรค) หรือไม่
+    ตรวจสอบว่า SKU ในบิลตรงกับสินค้า Bulky (ค้นหาแบบยืดหยุ่นไม่สนขีด/เว้นวรรค)
     """
     if not bulky_list:
-        return True # ถ้าไม่ได้ใส่รายการ Bulky กำหนดไว้ ให้ถือว่าเข้าเกณฑ์เมื่อจำนวน >= 2
-        
+        # หากไม่มีรายการ Bulky ให้ถือว่าจำนวน >= 2 ต้องแยกกล่องทั้งหมด
+        return True
+
     for sku in skus:
         norm_sku = re.sub(r'[\-\s]', '', sku).upper()
         for b_sku in bulky_list:
             norm_b = re.sub(r'[\-\s]', '', b_sku).upper()
-            if norm_b in norm_sku:
+            if norm_b and norm_b in norm_sku:
                 return True
     return False
 
@@ -244,17 +265,18 @@ def extract_data_from_page(text, bulky_list):
     data["sku"] = ", ".join(extracted_skus)
     data["order_id"] = extract_order_id(text)
 
-    # ด่านที่ 1: เช็คยอด "รวมทั้งสิ้น"
+    # 1. อ่านยอดรวมทั้งสิ้น
     total_qty = extract_grand_total_qty(text)
     data["qty"] = total_qty
 
+    # 2. DECISION LOGIC
     if total_qty == 1:
-        # เท่ากับ 1 ชิ้น -> บิลปกติ
+        # ยอดรวมเท่ากับ 1 ชิ้น -> สรุปทันที: บิลปกติ
         data["need_split"] = False
         data["boxes"] = 1
         data["box_status"] = "✅ ปกติ (1 กล่อง)"
     else:
-        # ตั้งแต่ 2 ชิ้นขึ้นไป -> ด่านที่ 2: ตรวจหา Bulky SKU (ไม่สนขีด/เว้นวรรค)
+        # ตั้งแต่ 2 ชิ้นขึ้นไป -> ตรวจหา Bulky SKU
         if is_bulky_sku(extracted_skus, bulky_list):
             data["need_split"] = True
             data["boxes"] = total_qty
@@ -301,11 +323,11 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_list):
             progress = processed_pages / total_pages
             progress_bar.progress(progress)
 
-    # แบ่งกองบิลปกติ และ บิลเพิ่มกล่อง
+    # แยกบิลปกติ และ บิลเพิ่มกล่อง
     normal_bills = [p for p in all_pages_data if not p["need_split"]]
     split_bills = [p for p in all_pages_data if p["need_split"]]
 
-    # จัดเรียงแต่ละกลุ่ม
+    # จัดเรียงบิล
     if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
         normal_bills.sort(key=lambda x: (x["courier"], x["zone"], x["sku"]))
         split_bills.sort(key=lambda x: (x["courier"], x["zone"], x["sku"]))
@@ -318,7 +340,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_list):
 
     final_pages_data = normal_bills + split_bills
 
-    # เขียน PDF และแปะลายน้ำเฉพาะกลุ่มที่ต้องเพิ่มกล่อง
+    # เขียน PDF + แปะลายน้ำ EXTRA BOX เฉพาะกลุ่มท้ายเล่ม
     watermark_page = None
 
     for page_info in final_pages_data:
@@ -344,7 +366,27 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_list):
 # ================= HEADER =================
 
 st.title("📦 Sharp Bill Sorter")
-st.caption("ระบบจัดเรียงบิลอัจฉริยะ (เช็คยอดรวม -> ตรวจหา Bulky SKU ไม่สนขีด/เว้นวรรค -> แยกท้ายเล่ม + ปั๊มตรา)")
+st.caption("ระบบจัดเรียงบิลอัจฉริยะ (เช็คยอดรวม -> ตรวจหา Bulky SKU -> แยกไว้ท้ายเล่ม + ปั๊มตรา EXTRA BOX)")
+
+st.markdown("---")
+
+# ================= BULKY SKU AUTO-LOAD =================
+
+default_bulky_skus, file_found = load_bulky_skus_from_file("bulky_skus.txt")
+
+if file_found:
+    st.success(f"✅ โหลดไฟล์ `bulky_skus.txt` สำเร็จ! พบรายการ Bulky SKU ทั้งหมด {len(default_bulky_skus)} รายการ")
+else:
+    st.info("ℹ️ ไม่พบไฟล์ `bulky_skus.txt` ในระบบ สามารถพิมพ์ระบุรายการด้านล่างได้ครับ")
+
+with st.expander("⚙️ ดู/แก้ไข รายการ Bulky SKU (สินค้าใหญ่ที่ต้องเพิ่มกล่อง)", expanded=not file_found):
+    bulky_text_default = "\n".join(default_bulky_skus)
+    bulky_input = st.text_area(
+        "รายชื่อ Bulky SKU (บรรทัดละ 1 SKU)",
+        value=bulky_text_default,
+        height=150
+    )
+    bulky_list = [s.strip() for s in bulky_input.replace(",", "\n").splitlines() if s.strip()]
 
 st.markdown("---")
 
@@ -364,20 +406,9 @@ sort_mode = st.radio(
 
 st.markdown("---")
 
-# ================= BULKY SKU INPUT =================
+# ================= STEP 2: UPLOAD =================
 
-st.subheader("📋 ขั้นตอนที่ 2 : กำหนดรายการ Bulky SKU (สินค้าใหญ่ที่ต้องแยกกล่อง)")
-bulky_input = st.text_area(
-    "ใส่รหัส SKU สินค้าใหญ่ (บรรทัดละ 1 SKU หรือคั่นด้วยคอมมา) หากเว้นว่างไว้ ระบบจะถือว่าสินค้าที่ยอดรวม >= 2 ทุกตัวต้องเพิ่มกล่อง",
-    value=""
-)
-bulky_list = [s.strip() for s in bulky_input.replace(",", "\n").splitlines() if s.strip()]
-
-st.markdown("---")
-
-# ================= STEP 3: UPLOAD =================
-
-st.subheader("📂 ขั้นตอนที่ 3 : อัปโหลด PDF")
+st.subheader("📂 ขั้นตอนที่ 2 : อัปโหลด PDF")
 
 uploaded_files = st.file_uploader(
     "ลากไฟล์ PDF มาวางตรงนี้",
@@ -407,10 +438,10 @@ if uploaded_files:
                 )
 
             df = pd.DataFrame(details)
-            st.success("🎉 จัดบิลสำเร็จตามเงื่อนไขที่กำหนดเรียบร้อย!")
+            st.success("🎉 จัดบิลสำเร็จเรียบร้อย!")
 
             # ================= DEBUG PANEL =================
-            with st.expander("🛠️ DEBUG INFO: ตรวจสอบค่าที่อ่านได้จริงรายหน้า", expanded=True):
+            with st.expander("🛠️ DEBUG INFO: ตรวจสอบค่าที่อ่านได้จริงรายหน้า", expanded=False):
                 st.write("ตารางแสดงค่าจากบิลที่จัดเรียงแล้ว (เรียงจากบนลงล่างตามไฟล์ PDF ใหม่):")
                 debug_df = df.copy()
                 debug_df["หน้าใน PDF ใหม่"] = debug_df.index + 1
