@@ -9,8 +9,6 @@ import math
 # นำเข้า ReportLab สำหรับสร้างลายน้ำ
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 
 # ================= PAGE CONFIG =================
 st.set_page_config(
@@ -83,55 +81,37 @@ def load_bulky_skus(file_path="bulky_skus.txt"):
     return set()
 
 
-# ================= WATERMARK CREATOR =================
+# ================= WATERMARK CREATOR (ปรับขนาดให้เล็กลง ไม่บังตาราง) =================
 
 def create_watermark_page(width=595, height=842):
     """
-    สร้างหน้าลายน้ำ 'เพิ่มกล่อง' สีแดงเด่นชัด
+    สร้างตราปั๊ม 'EXTRA BOX' ขนาดพอดี ไม่บังตัวหนังสือสำคัญในบิล
     """
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(width, height))
     
-    # พยายามดึงฟอนต์ภาษาไทยจากระบบ
-    thai_font_name = None
-    font_paths = [
-        "/usr/share/fonts/truetype/tlwg/Garuda.ttf",          # Linux / Streamlit Cloud
-        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",     # Linux Fallback
-        "C:\\Windows\\Fonts\\tahoma.ttf",                      # Windows
-        "C:\\Windows\\Fonts\\angsa.ttf",                       # Windows
-        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf" # macOS
-    ]
-    
-    for path in font_paths:
-        if os.path.exists(path):
-            try:
-                pdfmetrics.registerFont(TTFont('ThaiSystemFont', path))
-                thai_font_name = 'ThaiSystemFont'
-                break
-            except:
-                pass
-
     c.saveState()
-    # ย้ายจุดหมุนไปกลางหน้ากระดาษ
-    c.translate(width / 2, height / 2)
-    c.rotate(25)  # เอียง 25 องศา
     
-    # วาดตราปั๊มกรอบสีแดง
+    # กำหนดขนาดตราปั๊มให้พอดี ไม่ใหญ่เกินไป
+    stamp_w, stamp_h = 140, 38
+    
+    # วางไว้ตำแหน่ง มุมขวาบน ของใบสั่งซื้อ (พ้นจากตาราง SKU และบาร์โค้ด)
+    x_pos = width - stamp_w - 35
+    y_pos = height - stamp_h - 35
+    
+    c.translate(x_pos + stamp_w / 2, y_pos + stamp_h / 2)
+    c.rotate(-8)  # เอียงเล็กน้อยพอสวยงาม (8 องศา)
+    
+    # วาดกรอบตราปั๊มสีแดง
     c.setStrokeColor(colors.HexColor("#DC2626"))
-    c.setFillColor(colors.HexColor("#FEE2E2"))
-    c.setLineWidth(5)
-    c.roundRect(-170, -45, 340, 90, 15, stroke=1, fill=1)
+    c.setFillColor(colors.HexColor("#FEF2F2"))  # สีพื้นหลังแดงอ่อน
+    c.setLineWidth(2.5)
+    c.roundRect(-stamp_w / 2, -stamp_h / 2, stamp_w, stamp_h, 8, stroke=1, fill=1)
     
-    # เขียนข้อความลายน้ำ
-    if thai_font_name:
-        c.setFont(thai_font_name, 38)
-        c.setFillColor(colors.HexColor("#DC2626"))
-        c.drawCentredString(0, -12, "เพิ่มกล่อง")
-    else:
-        # Fallback กรณีไม่พบฟอนต์ไทยบนเซิร์ฟเวอร์
-        c.setFont("Helvetica-Bold", 36)
-        c.setFillColor(colors.HexColor("#DC2626"))
-        c.drawCentredString(0, -10, "EXTRA BOX")
+    # ข้อความตราปั๊ม
+    c.setFont("Helvetica-Bold", 15)
+    c.setFillColor(colors.HexColor("#DC2626"))
+    c.drawCentredString(0, -5, "EXTRA BOX")
         
     c.restoreState()
     c.save()
@@ -208,16 +188,30 @@ def extract_order_id(text):
     return "Unknown"
 
 
-def extract_sku(text):
+# --- รองรับการดึงหลาย SKU ใน 1 หน้าบิล ---
+def extract_all_skus(text):
+    """
+    ดึง SKU ทุกตัวที่ปรากฏในบิลใบเดียวกัน
+    """
     patterns = [
         r'(1-GDS-[A-Z0-9\-]+)',
         r'(\d+-[A-Z]+-[A-Z0-9\-]+)'
     ]
+    found_skus = []
     for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1)
-    return "ZZZZZZ"
+        matches = re.findall(pattern, text)
+        if matches:
+            found_skus.extend(matches)
+            
+    # ตัดรายการ SKU ซ้ำโดยยังคงลำดับเดิมไว้
+    seen = set()
+    unique_skus = []
+    for s in found_skus:
+        if s not in seen:
+            seen.add(s)
+            unique_skus.append(s)
+
+    return unique_skus if unique_skus else ["ZZZZZZ"]
 
 
 def extract_qty(text):
@@ -250,6 +244,7 @@ def extract_data_from_page(text, bulky_skus):
     data = {
         "zone": "Unknown",
         "sku": "ZZZZZZ",
+        "all_skus": [],
         "qty": 1,
         "source": "Unknown",
         "track_no": "Unknown",
@@ -271,14 +266,20 @@ def extract_data_from_page(text, bulky_skus):
         data["source"]
     )
     data["zone"] = extract_zone(text)
-    data["sku"] = extract_sku(text)
+    
+    # ดึง SKU ทั้งหมดในหน้าบิล
+    extracted_skus = extract_all_skus(text)
+    data["all_skus"] = extracted_skus
+    data["sku"] = ", ".join(extracted_skus)  # รวม SKU แสดงในตาราง
+
     data["qty"] = extract_qty(text)
     data["order_id"] = extract_order_id(text)
 
-    # --- ตรวจสอบเงื่อนไข Bulky SKU และการแยกกล่อง ---
-    data["is_bulky"] = data["sku"] in bulky_skus
+    # --- ตรวจสอบเงื่อนไข Multi-SKU และ Bulky ---
+    bulky_found = [s for s in extracted_skus if s in bulky_skus]
+    data["is_bulky"] = len(bulky_found) > 0
     
-    # เงื่อนไข: สินค้า Bulky และสั่งซื้อมากกว่า 2 ชิ้นขึ้นไป (qty > 2)
+    # เงื่อนไข: มีสินค้า Bulky ในบิล และจำนวนสินค้ารวมในบิล > 2 ชิ้น
     if data["is_bulky"] and data["qty"] > 2:
         data["need_split"] = True
         data["boxes"] = data["qty"]
@@ -305,7 +306,6 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
     pdf_streams = []
     readers = []
 
-    # โหลดไฟล์และอ่านหน้าทั้งหมด
     for file_index, uploaded_file in enumerate(uploaded_files):
         file_bytes = uploaded_file.getvalue()
         stream = io.BytesIO(file_bytes)
@@ -318,7 +318,6 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
     progress_bar = st.progress(0)
     processed_pages = 0
 
-    # ดึงข้อมูลจากแต่ละหน้า
     for file_index, reader in readers:
         for page in reader.pages:
             text = page.extract_text() or ""
@@ -332,11 +331,11 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
             progress_bar.progress(progress)
 
     # ================= SORTING LOGIC =================
-    # ใช้ need_split (0=ไม่แยก, 1=เพิ่มกล่อง) นำหน้า เพื่อย้ายพวก "เพิ่มกล่อง" ไปอยู่ท้ายสุดเสมอ
+    # ใช้ need_split (0=ปกติอยู่หน้า, 1=เพิ่มกล่องไปท้ายสุด)
     if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
         all_pages_data.sort(
             key=lambda x: (
-                x["need_split"],  # False (0) อยู่หน้า, True (1) ไปอยู่ท้ายสุด
+                x["need_split"],
                 x["courier"],
                 x["zone"],
                 x["sku"]
@@ -364,15 +363,12 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
     for page_info in all_pages_data:
         page = page_info["reader_page_ref"]
 
-        # ถ้าเป็นหน้าที่ต้องเพิ่มกล่อง ให้ประทับลายน้ำสีแดง
         if page_info["need_split"]:
             if watermark_page is None:
-                # คำนวณขนาดหน้ากระดาษเพื่อสร้างลายน้ำให้พอดี
                 page_w = float(page.mediabox.width)
                 page_h = float(page.mediabox.height)
                 watermark_page = create_watermark_page(page_w, page_h)
             
-            # รวมลายน้ำเข้ากับหน้า PDF
             page.merge_page(watermark_page)
 
         writer.add_page(page)
@@ -387,7 +383,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
 # ================= HEADER =================
 
 st.title("📦 Sharp Bill Sorter")
-st.caption("ระบบจัดเรียงบิลอัจฉริยะ (ย้ายบิลเพิ่มกล่องไว้ท้ายสุด + ประทับตราลายน้ำ)")
+st.caption("ระบบจัดเรียงบิลอัจฉริยะ (รองรับหลาย SKU ในบิลเดียว + ปั๊มตรา EXTRA BOX มุมขวาบน)")
 
 # โหลดรายการ Bulky SKUs
 bulky_skus = load_bulky_skus("bulky_skus.txt")
@@ -443,7 +439,7 @@ if uploaded_files:
                 )
 
             df = pd.DataFrame(details)
-            st.success("🎉 จัดบิลสำเร็จ! (ย้ายรายการเพิ่มกล่องไปอยู่ช่วงท้ายสุดเรียบร้อยแล้ว)")
+            st.success("🎉 จัดบิลสำเร็จ! (ย้ายรายการเพิ่มกล่องไปไว้ท้ายสุดเรียบร้อยแล้ว)")
 
             # ================= METRICS =================
 
@@ -471,7 +467,7 @@ if uploaded_files:
             # ================= DOWNLOAD PDF =================
 
             st.download_button(
-                label="📥 ดาวน์โหลด PDF ที่จัดเรียงแล้ว (มีลายน้ำ)",
+                label="📥 ดาวน์โหลด PDF ที่จัดเรียงแล้ว (มีตราปั๊ม)",
                 data=sorted_pdf,
                 file_name="sharp_sorted_bills_with_watermark.pdf",
                 mime="application/pdf",
@@ -596,4 +592,3 @@ with col2:
     if st.button("🔄 เริ่มรอบใหม่", use_container_width=True):
         st.session_state.uploader_key += 1
         st.rerun()
-
