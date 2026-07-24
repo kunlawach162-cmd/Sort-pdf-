@@ -76,8 +76,14 @@ def load_bulky_skus(file_path="bulky_skus.txt"):
     """โหลด รายการ SKU สินค้าชิ้นใหญ่จากไฟล์ bulky_skus.txt"""
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8") as f:
-            return set(re.sub(r'\s+', '', line.strip()).upper() for line in f if line.strip())
-    return set()
+            # เก็บรายการรหัสสินค้าชิ้นใหญ่ ตัดช่องว่าง/ขีด เพื่อเตรียมไว้ค้นหาแบบยืดหยุ่น
+            skus = []
+            for line in f:
+                clean = line.strip()
+                if clean:
+                    skus.append(clean)
+            return skus
+    return []
 
 
 # ================= WATERMARK CREATOR (ตำแหน่งตรงกลางล่าง) =================
@@ -184,7 +190,7 @@ def extract_order_id(text):
 
 def extract_all_skus(text):
     """
-    ดึง SKU ทุกตัวที่มีในบิล (รองรับรูปแบบ 1-GDS-SHARP-000000509)
+    ดึง SKU ทุกตัวที่มีในบิล
     """
     if not text:
         return ["ZZZZZZ"]
@@ -225,7 +231,7 @@ def extract_grand_total_qty(text):
         
     clean_text = text.replace('\xa0', ' ')
 
-    # 1. ค้นหา "รวมทั้งสิ้น X" (รองรับช่องว่างภาษาไทย)
+    # 1. ค้นหา "รวมทั้งสิ้น X"
     total_match = re.search(r'ร\s*ว\s*ม\s*ทั้\s*ง\s*สิ้\s*น\s*[:\=]?\s*(\d{1,3})', clean_text, re.IGNORECASE)
     if total_match:
         return int(total_match.group(1))
@@ -235,7 +241,7 @@ def extract_grand_total_qty(text):
     if total_en_match:
         return int(total_en_match.group(1))
 
-    # 3. สำรองกรณีหาคำว่ารวมทั้งสิ้นไม่เจอจริงๆ ค่อยรวมจากตาราง QTY (A - 1)
+    # 3. ค้นหาจากตาราง QTY
     line_qtys = re.findall(r'\b[A-Z]\s*-\s*(\d{1,2})\b', clean_text)
     if line_qtys:
         return sum(int(q) for q in line_qtys)
@@ -243,7 +249,25 @@ def extract_grand_total_qty(text):
     return 1
 
 
-def extract_data_from_page(text, bulky_skus):
+def check_is_bulky(text, bulky_skus_list):
+    """
+    ตรวจสอบว่ามีสินค้า Bulky ในบิลหรือไม่ โดยค้นแบบ Substring (ไม่สนช่องว่าง/ขีด)
+    """
+    if not text or not bulky_skus_list:
+        return False
+
+    # ทำความสะอาดข้อความทั้งหน้าบิล (ลบช่องว่างและขีดออก)
+    cleaned_page_text = re.sub(r'[\s\-]+', '', text).upper()
+
+    for bulky_sku in bulky_skus_list:
+        cleaned_bulky = re.sub(r'[\s\-]+', '', bulky_sku).upper()
+        if len(cleaned_bulky) >= 3 and cleaned_bulky in cleaned_page_text:
+            return True
+
+    return False
+
+
+def extract_data_from_page(text, bulky_skus_list):
     data = {
         "zone": "Unknown",
         "sku": "ZZZZZZ",
@@ -275,23 +299,22 @@ def extract_data_from_page(text, bulky_skus):
     data["sku"] = ", ".join(extracted_skus)
     data["order_id"] = extract_order_id(text)
 
-    # ------------------ NEW LOGIC BY GRAND TOTAL ------------------
-    # 1. ดึงยอด "รวมทั้งสิ้น" เป็นหลัก
+    # 1. ยอด "รวมทั้งสิ้น"
     total_qty = extract_grand_total_qty(text)
     data["qty"] = total_qty
 
-    # 2. เช็คว่ามีสินค้า Bulky หรือไม่
-    bulky_found = [s for s in extracted_skus if s in bulky_skus]
-    data["is_bulky"] = len(bulky_found) > 0
+    # 2. ตรวจจับสินค้า Bulky แบบยืดหยุ่น (ทนต่อชื่อรุ่น/รหัสย่อ)
+    is_bulky = check_is_bulky(text, bulky_skus_list)
+    data["is_bulky"] = is_bulky
 
-    # 3. เงื่อนไขตัดสินใจการปั๊มลายน้ำ EXTRA BOX:
-    # - ถ้า รวมทั้งสิ้น == 1 -> ปลอดภัย! เป็นออเดอร์เดี่ยว ไม่ติดลายน้ำแน่นอน 100%
-    # - ถ้า รวมทั้งสิ้น >= 2 AND มีสินค้า Bulky -> ติดลายน้ำ EXTRA BOX + ย้ายไปท้ายสุด
+    # 3. เงื่อนไขตัดสินใจการปั๊มลายน้ำ และแยกไปท้ายสุด:
+    # - ยอดรวม 1 ชิ้น -> ปกติ (ไม่แยก, ไม่ปั๊มลายน้ำ)
+    # - ยอดรวม >= 2 ชิ้น AND เป็นสินค้าใหญ่ -> 🚨 เพิ่มกล่อง (ย้ายไปท้ายสุด + ปั๊มลายน้ำ)
     if total_qty == 1:
         data["need_split"] = False
         data["boxes"] = 1
         data["box_status"] = "✅ ปกติ (1 กล่อง)"
-    elif data["is_bulky"] and total_qty >= 2:
+    elif is_bulky and total_qty >= 2:
         data["need_split"] = True
         data["boxes"] = total_qty
         data["box_status"] = f"🚨 เพิ่มกล่อง ({total_qty} กล่อง)"
@@ -338,6 +361,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
             progress_bar.progress(progress)
 
     # ================= SORTING LOGIC =================
+    # x["need_split"] -> False (0) อยู่หน้าสุด, True (1) ถูกย้ายไปท้ายสุด
     if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
         all_pages_data.sort(
             key=lambda x: (
