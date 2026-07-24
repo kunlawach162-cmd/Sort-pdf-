@@ -4,7 +4,6 @@ import pandas as pd
 import re
 import io
 import os
-import math
 
 # นำเข้า ReportLab สำหรับสร้างลายน้ำ
 from reportlab.pdfgen import canvas
@@ -74,14 +73,15 @@ div[data-testid="stFileUploader"] {
 
 @st.cache_data
 def load_bulky_skus(file_path="bulky_skus.txt"):
-    """โหลด รายการ SKU สินค้าชิ้นใหญ่จากไฟล์ bulky_skus.txt"""
+    """โหลด รายการ SKU สินค้าชิ้นใหญ่จากไฟล์ bulky_skus.txt พร้อมทำความสะอาดข้อความ"""
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8") as f:
-            return set(line.strip() for line in f if line.strip())
+            # แปลงเป็น ตัวพิมพ์ใหญ่ และ ตัดช่องว่าง เพื่อให้เทียบรหัสตรงกัน 100%
+            return set(re.sub(r'\s+', '', line.strip()).upper() for line in f if line.strip())
     return set()
 
 
-# ================= WATERMARK CREATOR (ปรับตำแหน่งให้อยู่ ตรงกลางล่าง) =================
+# ================= WATERMARK CREATOR (ตำแหน่งตรงกลางล่าง) =================
 
 def create_watermark_page(width=595, height=842):
     """
@@ -92,23 +92,18 @@ def create_watermark_page(width=595, height=842):
     
     c.saveState()
     
-    # กำหนดขนาดตราปั๊ม
     stamp_w, stamp_h = 160, 42
-    
-    # ตำแหน่ง: ตรงกลางแนวนอน (width / 2) และ อยู่ขอบล่าง (เว้นจากขอบล่างขึ้นมา 50 pt)
     x_pos = width / 2
     y_pos = 50
     
     c.translate(x_pos, y_pos)
-    c.rotate(-5)  # เอียงเล็กน้อย 5 องศา พอสวยงามสไตล์ตราปั๊ม
+    c.rotate(-5)  # เอียงเล็กน้อย 5 องศา
     
-    # วาดกรอบตราปั๊มสีแดง
     c.setStrokeColor(colors.HexColor("#DC2626"))
-    c.setFillColor(colors.HexColor("#FEF2F2"))  # สีพื้นหลังแดงอ่อน
+    c.setFillColor(colors.HexColor("#FEF2F2"))
     c.setLineWidth(2.5)
     c.roundRect(-stamp_w / 2, -stamp_h / 2, stamp_w, stamp_h, 8, stroke=1, fill=1)
     
-    # ข้อความตราปั๊ม
     c.setFont("Helvetica-Bold", 16)
     c.setFillColor(colors.HexColor("#DC2626"))
     c.drawCentredString(0, -5, "EXTRA BOX")
@@ -190,18 +185,39 @@ def extract_order_id(text):
 
 def extract_all_skus(text):
     """
-    ดึง SKU ทุกตัวที่ปรากฏในบิลใบเดียวกัน
+    ดึง SKU ทุกตัวที่มีในบิล โดยปรับแก้ให้ทนต่อปัญหา PDF แทรกช่องว่าง/ตัดบรรทัด
     """
-    patterns = [
-        r'(1-GDS-[A-Z0-9\-]+)',
-        r'(\d+-[A-Z]+-[A-Z0-9\-]+)'
-    ]
+    if not text:
+        return ["ZZZZZZ"]
+
     found_skus = []
+
+    # 1. Regex รูปแบบยืดหยุ่น ยอมรับช่องว่างรอบขีด -
+    patterns = [
+        r'(1\s*-\s*GDS\s*-\s*SHARP\s*-\s*[A-Z0-9]+)',   # รูปแบบ 1-GDS-SHARP-xxxxxx
+        r'(1\s*-\s*GDS\s*-\s*[A-Z0-9\-]+)',             # รูปแบบ 1-GDS-xxxx
+        r'(\d+\s*-\s*[A-Z]+\s*-\s*[A-Z0-9\-]+)'         # รูปแบบ ตัวเลข-ตัวอักษร-รหัส
+    ]
+
     for pattern in patterns:
-        matches = re.findall(pattern, text)
-        if matches:
-            found_skus.extend(matches)
-            
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        for m in matches:
+            # ทำความสะอาดรหัส: ลบช่องว่างทั้งหมดออก และเปลี่ยนเป็นตัวพิมพ์ใหญ่
+            clean_sku = re.sub(r'\s+', '', m).upper()
+            if clean_sku and len(clean_sku) >= 8:
+                found_skus.append(clean_sku)
+
+    # 2. สำรอง: หาก Regex ด้านบนไม่เจอ ให้ค้นหาบรรทัดที่มีคำว่า GDS หรือ SHARP
+    if not found_skus:
+        for line in text.splitlines():
+            if "GDS" in line.upper() or "SHARP" in line.upper():
+                words = line.split()
+                for w in words:
+                    clean_w = re.sub(r'\s+', '', w).upper()
+                    if "1-GDS" in clean_w or ("SHARP" in clean_w and "-" in clean_w):
+                        found_skus.append(clean_w)
+
+    # ลบรายการ SKU ซ้ำโดยยังคงลำดับเดิมไว้
     seen = set()
     unique_skus = []
     for s in found_skus:
@@ -265,9 +281,10 @@ def extract_data_from_page(text, bulky_skus):
     )
     data["zone"] = extract_zone(text)
     
+    # ดึง SKU ทั้งหมดในหน้าบิล
     extracted_skus = extract_all_skus(text)
     data["all_skus"] = extracted_skus
-    data["sku"] = ", ".join(extracted_skus)
+    data["sku"] = ", ".join(extracted_skus)  # รวม SKU แสดงในรายการ
 
     data["qty"] = extract_qty(text)
     data["order_id"] = extract_order_id(text)
@@ -328,7 +345,6 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
             progress_bar.progress(progress)
 
     # ================= SORTING LOGIC =================
-    # ใช้ need_split (0=ปกติอยู่หน้า, 1=เพิ่มกล่องไปท้ายสุด)
     if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
         all_pages_data.sort(
             key=lambda x: (
