@@ -3,7 +3,6 @@ from pypdf import PdfReader, PdfWriter
 import pandas as pd
 import re
 import io
-import os
 
 # นำเข้า ReportLab สำหรับสร้างลายน้ำ
 from reportlab.pdfgen import canvas
@@ -69,23 +68,6 @@ div[data-testid="stFileUploader"] {
 </style>
 """, unsafe_allow_html=True)
 
-# ================= BULKY SKUS LOADER =================
-
-@st.cache_data
-def load_bulky_skus(file_path="bulky_skus.txt"):
-    """โหลด รายการ SKU สินค้าชิ้นใหญ่จากไฟล์ bulky_skus.txt"""
-    if os.path.exists(file_path):
-        with open(file_path, "r", encoding="utf-8") as f:
-            # เก็บรายการรหัสสินค้าชิ้นใหญ่ ตัดช่องว่าง/ขีด เพื่อเตรียมไว้ค้นหาแบบยืดหยุ่น
-            skus = []
-            for line in f:
-                clean = line.strip()
-                if clean:
-                    skus.append(clean)
-            return skus
-    return []
-
-
 # ================= WATERMARK CREATOR (ตำแหน่งตรงกลางล่าง) =================
 
 def create_watermark_page(width=595, height=842):
@@ -128,6 +110,8 @@ def detect_platform(text):
         return "Shopee 🟠"
     if "lazada" in text or "lada" in text:
         return "Lazada 🔵"
+    if "tiktok" in text:
+        return "TikTok 🖤"
     return "Unknown"
 
 
@@ -144,7 +128,7 @@ def detect_courier(track_no, source):
         return "Kerry Express 🟡"
     elif t.startswith("FLA"):
         return "Flash Express ⚡"
-    elif t.startswith("JT"):
+    elif t.startswith("JT") or t.startswith("JTTH"):
         return "J&T Express 🟣"
 
     return f"ขนส่งอื่นๆ ({source.split()[0]}) 🚚"
@@ -190,28 +174,20 @@ def extract_order_id(text):
 
 def extract_all_skus(text):
     """
-    ดึง SKU ทุกตัวที่มีในบิล
+    อ่านเฉพาะรหัสสินค้า เช่น 1-GDS-SHARP-000000510
     """
     if not text:
         return ["ZZZZZZ"]
 
-    clean_text = text.replace('\xa0', ' ')
+    # ค้นหารูปแบบ 1-GDS-SHARP-xxxxxxxxx หรือ 1-GDS-xxxxxxxxx
+    matches = re.findall(r'1\s*-\s*GDS\s*-\s*[A-Z0-9\-]+', text, re.IGNORECASE)
+    
     found_skus = []
-
-    matches = re.findall(r'1\s*-\s*GDS\s*-\s*[A-Z0-9\s\-]+', clean_text, re.IGNORECASE)
     for m in matches:
-        raw_sku = m.split()[0] if ' ' in m else m
-        clean_sku = re.sub(r'\s+', '', raw_sku).upper()
-        clean_sku = re.sub(r'(885\d+).*$', '', clean_sku)
-        clean_sku = clean_sku.rstrip('-')
-        
-        if len(clean_sku) >= 10:
-            found_skus.append(clean_sku)
+        clean_sku = re.sub(r'\s+', '', m).upper()
+        found_skus.append(clean_sku)
 
-    if not found_skus:
-        alt_matches = re.findall(r'1-GDS-[A-Z0-9\-]+', clean_text.replace(" ", "").upper())
-        found_skus.extend(alt_matches)
-
+    # ตัดตัวซ้ำแต่คงลำดับไว้
     seen = set()
     unique_skus = []
     for s in found_skus:
@@ -224,50 +200,27 @@ def extract_all_skus(text):
 
 def extract_grand_total_qty(text):
     """
-    อ่านยอด 'รวมทั้งสิ้น' ล่างสุดของบิลเป็นหลัก 100%
+    อ่านเฉพาะตัวเลขด้านหลังคำว่า 'รวมทั้งสิ้น' หรือ 'Total' เท่านั้น
     """
     if not text:
         return 1
-        
+
     clean_text = text.replace('\xa0', ' ')
 
-    # 1. ค้นหา "รวมทั้งสิ้น X"
+    # 1. ค้นหา "รวมทั้งสิ้น X" (รองรับเว้นวรรค)
     total_match = re.search(r'ร\s*ว\s*ม\s*ทั้\s*ง\s*สิ้\s*น\s*[:\=]?\s*(\d{1,3})', clean_text, re.IGNORECASE)
     if total_match:
         return int(total_match.group(1))
 
-    # 2. ค้นหา Total
+    # 2. ค้นหา "Total X"
     total_en_match = re.search(r'Total\s*[:\=]?\s*(\d{1,3})', clean_text, re.IGNORECASE)
     if total_en_match:
         return int(total_en_match.group(1))
 
-    # 3. ค้นหาจากตาราง QTY
-    line_qtys = re.findall(r'\b[A-Z]\s*-\s*(\d{1,2})\b', clean_text)
-    if line_qtys:
-        return sum(int(q) for q in line_qtys)
-
     return 1
 
 
-def check_is_bulky(text, bulky_skus_list):
-    """
-    ตรวจสอบว่ามีสินค้า Bulky ในบิลหรือไม่ โดยค้นแบบ Substring (ไม่สนช่องว่าง/ขีด)
-    """
-    if not text or not bulky_skus_list:
-        return False
-
-    # ทำความสะอาดข้อความทั้งหน้าบิล (ลบช่องว่างและขีดออก)
-    cleaned_page_text = re.sub(r'[\s\-]+', '', text).upper()
-
-    for bulky_sku in bulky_skus_list:
-        cleaned_bulky = re.sub(r'[\s\-]+', '', bulky_sku).upper()
-        if len(cleaned_bulky) >= 3 and cleaned_bulky in cleaned_page_text:
-            return True
-
-    return False
-
-
-def extract_data_from_page(text, bulky_skus_list):
+def extract_data_from_page(text):
     data = {
         "zone": "Unknown",
         "sku": "ZZZZZZ",
@@ -277,7 +230,6 @@ def extract_data_from_page(text, bulky_skus_list):
         "track_no": "Unknown",
         "courier": "Unknown",
         "order_id": "Unknown",
-        "is_bulky": False,
         "boxes": 1,
         "need_split": False,
         "box_status": "ปกติ (1 กล่อง)"
@@ -299,22 +251,15 @@ def extract_data_from_page(text, bulky_skus_list):
     data["sku"] = ", ".join(extracted_skus)
     data["order_id"] = extract_order_id(text)
 
-    # 1. ยอด "รวมทั้งสิ้น"
+    # อ่านยอด "รวมทั้งสิ้น"
     total_qty = extract_grand_total_qty(text)
     data["qty"] = total_qty
 
-    # 2. ตรวจจับสินค้า Bulky แบบยืดหยุ่น (ทนต่อชื่อรุ่น/รหัสย่อ)
-    is_bulky = check_is_bulky(text, bulky_skus_list)
-    data["is_bulky"] = is_bulky
-
-    # 3. เงื่อนไขตัดสินใจการปั๊มลายน้ำ และแยกไปท้ายสุด:
-    # - ยอดรวม 1 ชิ้น -> ปกติ (ไม่แยก, ไม่ปั๊มลายน้ำ)
-    # - ยอดรวม >= 2 ชิ้น AND เป็นสินค้าใหญ่ -> 🚨 เพิ่มกล่อง (ย้ายไปท้ายสุด + ปั๊มลายน้ำ)
-    if total_qty == 1:
-        data["need_split"] = False
-        data["boxes"] = 1
-        data["box_status"] = "✅ ปกติ (1 กล่อง)"
-    elif is_bulky and total_qty >= 2:
+    # ------------------ DECISION LOGIC ------------------
+    # เช็คแค่ยอด "รวมทั้งสิ้น" อย่างเดียวเลย:
+    # - รวมทั้งสิ้น == 1 -> ปกติ (อยู่กลุ่มหน้า ไม่ติดตรา)
+    # - รวมทั้งสิ้น >= 2 -> 🚨 เพิ่มกล่อง (คัดแยกไปท้ายเล่ม + ปั๊มตรา EXTRA BOX)
+    if total_qty >= 2:
         data["need_split"] = True
         data["boxes"] = total_qty
         data["box_status"] = f"🚨 เพิ่มกล่อง ({total_qty} กล่อง)"
@@ -328,7 +273,7 @@ def extract_data_from_page(text, bulky_skus_list):
 
 # ================= PDF PROCESS =================
 
-def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
+def process_multiple_pdfs(uploaded_files, sort_mode):
     all_pages_data = []
     writer = PdfWriter()
     total_pages = 0
@@ -351,7 +296,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
     for file_index, reader in readers:
         for page in reader.pages:
             text = page.extract_text() or ""
-            page_info = extract_data_from_page(text, bulky_skus)
+            page_info = extract_data_from_page(text)
             page_info["file_index"] = file_index
             page_info["reader_page_ref"] = page
 
@@ -361,7 +306,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
             progress_bar.progress(progress)
 
     # ================= SORTING LOGIC =================
-    # x["need_split"] -> False (0) อยู่หน้าสุด, True (1) ถูกย้ายไปท้ายสุด
+    # need_split = False (0) อยู่หน้าสุด, need_split = True (1) ถูกย้ายไปท้ายเล่ม
     if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
         all_pages_data.sort(
             key=lambda x: (
@@ -413,11 +358,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
 # ================= HEADER =================
 
 st.title("📦 Sharp Bill Sorter")
-st.caption("ระบบจัดเรียงบิลอัจฉริยะ (รองรับหลาย SKU ในบิลเดียว + ปั๊มตรา EXTRA BOX ตรงกลางล่าง)")
-
-# โหลดรายการ Bulky SKUs
-bulky_skus = load_bulky_skus("bulky_skus.txt")
-st.sidebar.info(f"📋 รายการ Bulky SKUs ในระบบ: **{len(bulky_skus)}** รายการ")
+st.caption("ระบบจัดเรียงบิลอัจฉริยะ (แยกรายการสินค้า 'รวมทั้งสิ้น >= 2' ไว้ท้ายเล่มอัตโนมัติพร้อมตราปั๊ม EXTRA BOX)")
 
 st.markdown("---")
 
@@ -461,15 +402,14 @@ if uploaded_files:
     ):
 
         try:
-            with st.spinner("⏳ กำลังประมวลผลและประทับตราลายน้ำ..."):
+            with st.spinner("⏳ กำลังประมวลผล คัดแยกออเดอร์ และประทับตราลายน้ำ..."):
                 sorted_pdf, details = process_multiple_pdfs(
                     uploaded_files,
-                    sort_mode,
-                    bulky_skus
+                    sort_mode
                 )
 
             df = pd.DataFrame(details)
-            st.success("🎉 จัดบิลสำเร็จ! (ย้ายรายการเพิ่มกล่องไปไว้ท้ายสุดเรียบร้อยแล้ว)")
+            st.success("🎉 จัดบิลสำเร็จ! (ย้ายรายการรวมทั้งสิ้น >= 2 ไปไว้ท้ายสุดเรียบร้อยแล้ว)")
 
             # ================= METRICS =================
 
@@ -622,3 +562,4 @@ with col2:
     if st.button("🔄 เริ่มรอบใหม่", use_container_width=True):
         st.session_state.uploader_key += 1
         st.rerun()
+
