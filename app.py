@@ -299,36 +299,39 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
             progress_bar.progress(progress)
 
-# SORT
-if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
+            progress_bar.progress(progress)
 
-    all_pages_data.sort(
-        key=lambda x: (
-            x["qty"] >= 2,
-            x["courier"],
-            x["zone"],
-            x["sku"]
+    # SORT
+    if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
+
+        all_pages_data.sort(
+            key=lambda x: (
+                x["qty"] >= 2,
+                x["courier"],
+                x["zone"],
+                x["sku"]
+            )
         )
-    )
 
-elif sort_mode == "📦 เรียงตามโซน -> SKU":
+    elif sort_mode == "📦 เรียงตามโซน -> SKU":
 
-    all_pages_data.sort(
-        key=lambda x: (
-            x["qty"] >= 2,
-            x["zone"],
-            x["sku"]
+        all_pages_data.sort(
+            key=lambda x: (
+                x["qty"] >= 2,
+                x["zone"],
+                x["sku"]
+            )
         )
-    )
 
-else:
+    else:
 
-    all_pages_data.sort(
-        key=lambda x: (
-            x["qty"] >= 2,
-            x["sku"]
+        all_pages_data.sort(
+            key=lambda x: (
+                x["qty"] >= 2,
+                x["sku"]
+            )
         )
-    )
+
     # WRITE PDF
     for page_info in all_pages_data:
 
@@ -343,44 +346,6 @@ else:
     output_pdf.seek(0)
 
     return output_pdf, all_pages_data
-
-
-# ================= HEADER =================
-
-st.title("📦 Sharp Bill Sorter")
-
-st.caption(
-    "ระบบจัดเรียงบิลอัจฉริยะสำหรับคลังสินค้า"
-)
-
-st.markdown("---")
-
-# ================= SORT MODE =================
-
-st.subheader("⚙️ ขั้นตอนที่ 1 : เลือกโหมดจัดเรียง")
-
-sort_mode = st.radio(
-    "เลือกรูปแบบการจัดบิล",
-    [
-        "🚚 เรียงตามขนส่ง -> SKU",
-        "📦 เรียงตามโซน -> SKU",
-        "🔤 เรียงตาม SKU อย่างเดียว"
-    ],
-    horizontal=True
-)
-
-st.markdown("---")
-
-# ================= UPLOAD =================
-
-st.subheader("📂 ขั้นตอนที่ 2 : อัปโหลด PDF")
-
-uploaded_files = st.file_uploader(
-    "ลากไฟล์ PDF มาวางตรงนี้",
-    type=["pdf"],
-    accept_multiple_files=True,
-    key=f"uploader_{st.session_state.uploader_key}"
-)
 
 # ================= PROCESS =================
 
