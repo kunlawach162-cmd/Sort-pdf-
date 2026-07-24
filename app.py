@@ -63,14 +63,10 @@ div[data-testid="stFileUploader"] {
 # ================= WATERMARK CREATOR =================
 
 def create_watermark_page(width=595, height=842):
-    """
-    สร้างตราปั๊ม 'EXTRA BOX' วางไว้ตรงกลางด้านล่างของหน้ากระดาษ
-    """
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(width, height))
     
     c.saveState()
-    
     stamp_w, stamp_h = 160, 42
     x_pos = width / 2
     y_pos = 50
@@ -181,15 +177,11 @@ def extract_all_skus(text):
 
 
 def extract_grand_total_qty(text):
-    """
-    อ่านยอดรวมแบบ Line-by-Line: สแกนบรรทัดที่มีคำว่า 'รวม' หรือ 'total' แล้วดึงเลขตัวสุดท้าย
-    """
     if not text:
         return 1
 
     lines = text.splitlines()
 
-    # 1. สแกนหาบรรทัดที่มีคำว่า "รวม"
     for line in lines:
         line_str = line.strip()
         if "รวม" in line_str:
@@ -197,7 +189,6 @@ def extract_grand_total_qty(text):
             if nums:
                 return int(nums[-1])
 
-    # 2. Fallback ภาษาอังกฤษ (total)
     for line in lines:
         line_str = line.strip().lower()
         if "total" in line_str:
@@ -208,7 +199,23 @@ def extract_grand_total_qty(text):
     return 1
 
 
-def extract_data_from_page(text):
+def is_bulky_sku(skus, bulky_list):
+    """
+    ตรวจสอบว่า SKU ในบิลตรงกับสินค้า Bulky (ไม่สนขีด/เว้นวรรค) หรือไม่
+    """
+    if not bulky_list:
+        return True # ถ้าไม่ได้ใส่รายการ Bulky กำหนดไว้ ให้ถือว่าเข้าเกณฑ์เมื่อจำนวน >= 2
+        
+    for sku in skus:
+        norm_sku = re.sub(r'[\-\s]', '', sku).upper()
+        for b_sku in bulky_list:
+            norm_b = re.sub(r'[\-\s]', '', b_sku).upper()
+            if norm_b in norm_sku:
+                return True
+    return False
+
+
+def extract_data_from_page(text, bulky_list):
     data = {
         "zone": "Unknown",
         "sku": "ZZZZZZ",
@@ -237,26 +244,32 @@ def extract_data_from_page(text):
     data["sku"] = ", ".join(extracted_skus)
     data["order_id"] = extract_order_id(text)
 
-    # อ่านยอดรวมทั้งสิ้น
+    # ด่านที่ 1: เช็คยอด "รวมทั้งสิ้น"
     total_qty = extract_grand_total_qty(text)
     data["qty"] = total_qty
 
-    # ------------------ SPLIT LOGIC ------------------
-    if total_qty >= 2:
-        data["need_split"] = True
-        data["boxes"] = total_qty
-        data["box_status"] = f"🚨 เพิ่มกล่อง ({total_qty} กล่อง)"
-    else:
+    if total_qty == 1:
+        # เท่ากับ 1 ชิ้น -> บิลปกติ
         data["need_split"] = False
         data["boxes"] = 1
         data["box_status"] = "✅ ปกติ (1 กล่อง)"
+    else:
+        # ตั้งแต่ 2 ชิ้นขึ้นไป -> ด่านที่ 2: ตรวจหา Bulky SKU (ไม่สนขีด/เว้นวรรค)
+        if is_bulky_sku(extracted_skus, bulky_list):
+            data["need_split"] = True
+            data["boxes"] = total_qty
+            data["box_status"] = f"🚨 เพิ่มกล่อง ({total_qty} กล่อง)"
+        else:
+            data["need_split"] = False
+            data["boxes"] = 1
+            data["box_status"] = "✅ ปกติ (1 กล่อง)"
 
     return data
 
 
 # ================= PDF PROCESS =================
 
-def process_multiple_pdfs(uploaded_files, sort_mode):
+def process_multiple_pdfs(uploaded_files, sort_mode, bulky_list):
     all_pages_data = []
     writer = PdfWriter()
     total_pages = 0
@@ -279,7 +292,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
     for file_index, reader in readers:
         for page in reader.pages:
             text = page.extract_text() or ""
-            page_info = extract_data_from_page(text)
+            page_info = extract_data_from_page(text, bulky_list)
             page_info["file_index"] = file_index
             page_info["reader_page_ref"] = page
 
@@ -288,11 +301,11 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
             progress = processed_pages / total_pages
             progress_bar.progress(progress)
 
-    # ================= 1. SPLIT INTO 2 GROUPS =================
+    # แบ่งกองบิลปกติ และ บิลเพิ่มกล่อง
     normal_bills = [p for p in all_pages_data if not p["need_split"]]
     split_bills = [p for p in all_pages_data if p["need_split"]]
 
-    # ================= 2. SORT EACH GROUP =================
+    # จัดเรียงแต่ละกลุ่ม
     if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
         normal_bills.sort(key=lambda x: (x["courier"], x["zone"], x["sku"]))
         split_bills.sort(key=lambda x: (x["courier"], x["zone"], x["sku"]))
@@ -303,10 +316,9 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
         normal_bills.sort(key=lambda x: x["sku"])
         split_bills.sort(key=lambda x: x["sku"])
 
-    # รวมกลุ่ม: บิลปกติไว้หน้า + บิลเพิ่มกล่องไว้ท้ายสุด
     final_pages_data = normal_bills + split_bills
 
-    # ================= 3. WRITE PDF & MERGE WATERMARK =================
+    # เขียน PDF และแปะลายน้ำเฉพาะกลุ่มที่ต้องเพิ่มกล่อง
     watermark_page = None
 
     for page_info in final_pages_data:
@@ -332,7 +344,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 # ================= HEADER =================
 
 st.title("📦 Sharp Bill Sorter")
-st.caption("ระบบจัดเรียงบิลอัจฉริยะ (แยกรายการสินค้า 'รวมทั้งสิ้น >= 2' ไว้ท้ายเล่มอัตโนมัติพร้อมตราปั๊ม EXTRA BOX)")
+st.caption("ระบบจัดเรียงบิลอัจฉริยะ (เช็คยอดรวม -> ตรวจหา Bulky SKU ไม่สนขีด/เว้นวรรค -> แยกท้ายเล่ม + ปั๊มตรา)")
 
 st.markdown("---")
 
@@ -352,9 +364,20 @@ sort_mode = st.radio(
 
 st.markdown("---")
 
-# ================= STEP 2: UPLOAD =================
+# ================= BULKY SKU INPUT =================
 
-st.subheader("📂 ขั้นตอนที่ 2 : อัปโหลด PDF")
+st.subheader("📋 ขั้นตอนที่ 2 : กำหนดรายการ Bulky SKU (สินค้าใหญ่ที่ต้องแยกกล่อง)")
+bulky_input = st.text_area(
+    "ใส่รหัส SKU สินค้าใหญ่ (บรรทัดละ 1 SKU หรือคั่นด้วยคอมมา) หากเว้นว่างไว้ ระบบจะถือว่าสินค้าที่ยอดรวม >= 2 ทุกตัวต้องเพิ่มกล่อง",
+    value=""
+)
+bulky_list = [s.strip() for s in bulky_input.replace(",", "\n").splitlines() if s.strip()]
+
+st.markdown("---")
+
+# ================= STEP 3: UPLOAD =================
+
+st.subheader("📂 ขั้นตอนที่ 3 : อัปโหลด PDF")
 
 uploaded_files = st.file_uploader(
     "ลากไฟล์ PDF มาวางตรงนี้",
@@ -376,14 +399,15 @@ if uploaded_files:
     ):
 
         try:
-            with st.spinner("⏳ กำลังประมวลผล คัดแยกออเดอร์ และประทับตราลายน้ำ..."):
+            with st.spinner("⏳ กำลังประมวลผล คัดแยกออเดอร์ตามเงื่อนไข และประทับตราลายน้ำ..."):
                 sorted_pdf, details = process_multiple_pdfs(
                     uploaded_files,
-                    sort_mode
+                    sort_mode,
+                    bulky_list
                 )
 
             df = pd.DataFrame(details)
-            st.success("🎉 จัดบิลสำเร็จ!")
+            st.success("🎉 จัดบิลสำเร็จตามเงื่อนไขที่กำหนดเรียบร้อย!")
 
             # ================= DEBUG PANEL =================
             with st.expander("🛠️ DEBUG INFO: ตรวจสอบค่าที่อ่านได้จริงรายหน้า", expanded=True):
@@ -396,7 +420,6 @@ if uploaded_files:
                     hide_index=True
                 )
                 
-                # Raw Text Inspector
                 st.markdown("---")
                 selected_page = st.number_input(
                     "เลือกหน้าที่ต้องการส่อง Raw Text (1-based)", 
