@@ -6,6 +6,12 @@ import io
 import os
 import math
 
+# นำเข้า ReportLab สำหรับสร้างลายน้ำ
+from reportlab.pdfgen import canvas
+from reportlab.lib import colors
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+
 # ================= PAGE CONFIG =================
 st.set_page_config(
     page_title="Sharp Bill Sorter",
@@ -77,6 +83,63 @@ def load_bulky_skus(file_path="bulky_skus.txt"):
     return set()
 
 
+# ================= WATERMARK CREATOR =================
+
+def create_watermark_page(width=595, height=842):
+    """
+    สร้างหน้าลายน้ำ 'เพิ่มกล่อง' สีแดงเด่นชัด
+    """
+    packet = io.BytesIO()
+    c = canvas.Canvas(packet, pagesize=(width, height))
+    
+    # พยายามดึงฟอนต์ภาษาไทยจากระบบ
+    thai_font_name = None
+    font_paths = [
+        "/usr/share/fonts/truetype/tlwg/Garuda.ttf",          # Linux / Streamlit Cloud
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",     # Linux Fallback
+        "C:\\Windows\\Fonts\\tahoma.ttf",                      # Windows
+        "C:\\Windows\\Fonts\\angsa.ttf",                       # Windows
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf" # macOS
+    ]
+    
+    for path in font_paths:
+        if os.path.exists(path):
+            try:
+                pdfmetrics.registerFont(TTFont('ThaiSystemFont', path))
+                thai_font_name = 'ThaiSystemFont'
+                break
+            except:
+                pass
+
+    c.saveState()
+    # ย้ายจุดหมุนไปกลางหน้ากระดาษ
+    c.translate(width / 2, height / 2)
+    c.rotate(25)  # เอียง 25 องศา
+    
+    # วาดตราปั๊มกรอบสีแดง
+    c.setStrokeColor(colors.HexColor("#DC2626"))
+    c.setFillColor(colors.HexColor("#FEE2E2"))
+    c.setLineWidth(5)
+    c.roundRect(-170, -45, 340, 90, 15, stroke=1, fill=1)
+    
+    # เขียนข้อความลายน้ำ
+    if thai_font_name:
+        c.setFont(thai_font_name, 38)
+        c.setFillColor(colors.HexColor("#DC2626"))
+        c.drawCentredString(0, -12, "เพิ่มกล่อง")
+    else:
+        # Fallback กรณีไม่พบฟอนต์ไทยบนเซิร์ฟเวอร์
+        c.setFont("Helvetica-Bold", 36)
+        c.setFillColor(colors.HexColor("#DC2626"))
+        c.drawCentredString(0, -10, "EXTRA BOX")
+        
+    c.restoreState()
+    c.save()
+    packet.seek(0)
+    
+    return PdfReader(packet).pages[0]
+
+
 # ================= FUNCTIONS =================
 
 def detect_platform(text):
@@ -127,7 +190,6 @@ def extract_zone(text):
 
 
 def extract_order_id(text):
-    # ดึงหมายเลขที่ขึ้นต้นด้วย PA ก่อน
     pa_match = re.search(r'(PA[A-Z0-9]+)', text, re.IGNORECASE)
     if pa_match:
         result = pa_match.group(1)
@@ -135,7 +197,6 @@ def extract_order_id(text):
             result = result[:-5]
         return result
 
-    # ถ้าไม่มี PA ค่อย fallback กลับไปหา Order ID ปกติ
     match = re.search(
         r'Order\s*ID\s*:\s*([A-Z0-9\-]+)',
         text,
@@ -159,7 +220,6 @@ def extract_sku(text):
     return "ZZZZZZ"
 
 
-# ================= FIXED QTY =================
 def extract_qty(text):
     lines = text.splitlines()
     for line in lines:
@@ -173,7 +233,6 @@ def extract_qty(text):
             if 1 <= qty <= 50:
                 return qty
 
-    # fallback
     full_text = text.replace("\n", " ")
     total_match = re.search(
         r'รวมทั้งสิ้น\s*(\d{1,3})',
@@ -198,6 +257,7 @@ def extract_data_from_page(text, bulky_skus):
         "order_id": "Unknown",
         "is_bulky": False,
         "boxes": 1,
+        "need_split": False,
         "box_status": "ปกติ (1 กล่อง)"
     }
 
@@ -215,17 +275,20 @@ def extract_data_from_page(text, bulky_skus):
     data["qty"] = extract_qty(text)
     data["order_id"] = extract_order_id(text)
 
-    # --- ตรวจสอบเงื่อนไข Bulky SKU และการคิดกล่อง ---
+    # --- ตรวจสอบเงื่อนไข Bulky SKU และการแยกกล่อง ---
     data["is_bulky"] = data["sku"] in bulky_skus
     
-    # กรณีเป็นสินค้า Bulky และสั่งซื้อมากกว่า 2 ชิ้น (qty > 2)
+    # เงื่อนไข: สินค้า Bulky และสั่งซื้อมากกว่า 2 ชิ้นขึ้นไป (qty > 2)
     if data["is_bulky"] and data["qty"] > 2:
-        data["boxes"] = data["qty"]  # แยกส่งกล่องละ 1 ชิ้น
-        data["box_status"] = f"🚨 แยกส่ง {data['qty']} กล่อง (Bulky >2)"
+        data["need_split"] = True
+        data["boxes"] = data["qty"]
+        data["box_status"] = f"🚨 เพิ่มกล่อง ({data['qty']} กล่อง)"
     elif data["is_bulky"]:
+        data["need_split"] = False
         data["boxes"] = 1
-        data["box_status"] = "⚠️ สินค้าใหญ่ (1-2 ชิ้นใส่ 1 กล่อง)"
+        data["box_status"] = "⚠️ สินค้าใหญ่ (1-2 ชิ้น)"
     else:
+        data["need_split"] = False
         data["boxes"] = 1
         data["box_status"] = "✅ ปกติ (1 กล่อง)"
 
@@ -268,10 +331,12 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
             progress = processed_pages / total_pages
             progress_bar.progress(progress)
 
-    # SORT
+    # ================= SORTING LOGIC =================
+    # ใช้ need_split (0=ไม่แยก, 1=เพิ่มกล่อง) นำหน้า เพื่อย้ายพวก "เพิ่มกล่อง" ไปอยู่ท้ายสุดเสมอ
     if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
         all_pages_data.sort(
             key=lambda x: (
+                x["need_split"],  # False (0) อยู่หน้า, True (1) ไปอยู่ท้ายสุด
                 x["courier"],
                 x["zone"],
                 x["sku"]
@@ -280,20 +345,37 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
     elif sort_mode == "📦 เรียงตามโซน -> SKU":
         all_pages_data.sort(
             key=lambda x: (
+                x["need_split"],
                 x["zone"],
                 x["sku"]
             )
         )
     else:
         all_pages_data.sort(
-            key=lambda x: x["sku"]
+            key=lambda x: (
+                x["need_split"],
+                x["sku"]
+            )
         )
 
-    # WRITE PDF
+    # ================= WRITE PDF & ADD WATERMARK =================
+    watermark_page = None
+
     for page_info in all_pages_data:
-        writer.add_page(
-            page_info["reader_page_ref"]
-        )
+        page = page_info["reader_page_ref"]
+
+        # ถ้าเป็นหน้าที่ต้องเพิ่มกล่อง ให้ประทับลายน้ำสีแดง
+        if page_info["need_split"]:
+            if watermark_page is None:
+                # คำนวณขนาดหน้ากระดาษเพื่อสร้างลายน้ำให้พอดี
+                page_w = float(page.mediabox.width)
+                page_h = float(page.mediabox.height)
+                watermark_page = create_watermark_page(page_w, page_h)
+            
+            # รวมลายน้ำเข้ากับหน้า PDF
+            page.merge_page(watermark_page)
+
+        writer.add_page(page)
 
     output_pdf = io.BytesIO()
     writer.write(output_pdf)
@@ -305,7 +387,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
 # ================= HEADER =================
 
 st.title("📦 Sharp Bill Sorter")
-st.caption("ระบบจัดเรียงบิลอัจฉริยะสำหรับคลังสินค้า (พร้อมระบบคำนวณกล่อง Bulky)")
+st.caption("ระบบจัดเรียงบิลอัจฉริยะ (ย้ายบิลเพิ่มกล่องไว้ท้ายสุด + ประทับตราลายน้ำ)")
 
 # โหลดรายการ Bulky SKUs
 bulky_skus = load_bulky_skus("bulky_skus.txt")
@@ -353,7 +435,7 @@ if uploaded_files:
     ):
 
         try:
-            with st.spinner("⏳ กำลังประมวลผล..."):
+            with st.spinner("⏳ กำลังประมวลผลและประทับตราลายน้ำ..."):
                 sorted_pdf, details = process_multiple_pdfs(
                     uploaded_files,
                     sort_mode,
@@ -361,16 +443,14 @@ if uploaded_files:
                 )
 
             df = pd.DataFrame(details)
-            st.success("🎉 จัดบิลสำเร็จ")
+            st.success("🎉 จัดบิลสำเร็จ! (ย้ายรายการเพิ่มกล่องไปอยู่ช่วงท้ายสุดเรียบร้อยแล้ว)")
 
             # ================= METRICS =================
 
             total_orders = len(df)
             total_qty = df["qty"].sum()
             total_boxes = df["boxes"].sum()
-
-            shopee_count = len(df[df["source"] == "Shopee 🟠"])
-            lazada_count = len(df[df["source"] == "Lazada 🔵"])
+            split_orders = len(df[df["need_split"] == True])
 
             col1, col2, col3, col4 = st.columns(4)
 
@@ -384,16 +464,16 @@ if uploaded_files:
                 st.metric("📫 รวมกล่องที่ต้องใช้", f"{total_boxes} กล่อง")
 
             with col4:
-                st.metric("🛒 Marketplace", f"Shopee {shopee_count} | Lazada {lazada_count}")
+                st.metric("🚨 ออเดอร์ที่ต้องเพิ่มกล่อง", f"{split_orders} บิล (อยู่ท้ายสุด)")
 
             st.markdown("---")
 
             # ================= DOWNLOAD PDF =================
 
             st.download_button(
-                label="📥 ดาวน์โหลด PDF ที่จัดเรียงแล้ว",
+                label="📥 ดาวน์โหลด PDF ที่จัดเรียงแล้ว (มีลายน้ำ)",
                 data=sorted_pdf,
-                file_name="sharp_sorted_bills.pdf",
+                file_name="sharp_sorted_bills_with_watermark.pdf",
                 mime="application/pdf",
                 use_container_width=True,
                 type="primary"
