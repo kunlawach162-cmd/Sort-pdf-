@@ -22,20 +22,16 @@ if "uploader_key" not in st.session_state:
 # ================= CSS =================
 st.markdown("""
 <style>
-
 html, body, [data-testid="stAppViewContainer"] {
     background-color: #faf9f6 !important;
     color: #1e293b;
 }
-
 .block-container {
     padding-top: 1rem;
 }
-
 h1, h2, h3 {
     color: #111827;
 }
-
 div[data-testid="stMetric"] {
     background-color: white;
     padding: 18px;
@@ -43,7 +39,6 @@ div[data-testid="stMetric"] {
     border: 1px solid #e5e7eb;
     box-shadow: 0 2px 8px rgba(0,0,0,0.03);
 }
-
 button[kind="primary"] {
     background-color: #10b981 !important;
     border-color: #10b981 !important;
@@ -52,19 +47,16 @@ button[kind="primary"] {
     border-radius: 10px !important;
     height: 3rem;
 }
-
 button[kind="primary"]:hover {
     background-color: #059669 !important;
     border-color: #059669 !important;
 }
-
 div[data-testid="stFileUploader"] {
     background-color: white;
     border: 2px dashed #d1d5db;
     border-radius: 14px;
     padding: 20px;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -173,21 +165,15 @@ def extract_order_id(text):
 
 
 def extract_all_skus(text):
-    """
-    อ่านเฉพาะรหัสสินค้า เช่น 1-GDS-SHARP-000000510
-    """
     if not text:
         return ["ZZZZZZ"]
 
-    # ค้นหารูปแบบ 1-GDS-SHARP-xxxxxxxxx หรือ 1-GDS-xxxxxxxxx
     matches = re.findall(r'1\s*-\s*GDS\s*-\s*[A-Z0-9\-]+', text, re.IGNORECASE)
-    
     found_skus = []
     for m in matches:
         clean_sku = re.sub(r'\s+', '', m).upper()
         found_skus.append(clean_sku)
 
-    # ตัดตัวซ้ำแต่คงลำดับไว้
     seen = set()
     unique_skus = []
     for s in found_skus:
@@ -199,15 +185,12 @@ def extract_all_skus(text):
 
 
 def extract_grand_total_qty(text):
-    """
-    อ่านเฉพาะตัวเลขด้านหลังคำว่า 'รวมทั้งสิ้น' หรือ 'Total' เท่านั้น
-    """
     if not text:
         return 1
 
     clean_text = text.replace('\xa0', ' ')
 
-    # 1. ค้นหา "รวมทั้งสิ้น X" (รองรับเว้นวรรค)
+    # 1. ค้นหา "รวมทั้งสิ้น X"
     total_match = re.search(r'ร\s*ว\s*ม\s*ทั้\s*ง\s*สิ้\s*น\s*[:\=]?\s*(\d{1,3})', clean_text, re.IGNORECASE)
     if total_match:
         return int(total_match.group(1))
@@ -256,9 +239,6 @@ def extract_data_from_page(text):
     data["qty"] = total_qty
 
     # ------------------ DECISION LOGIC ------------------
-    # เช็คแค่ยอด "รวมทั้งสิ้น" อย่างเดียวเลย:
-    # - รวมทั้งสิ้น == 1 -> ปกติ (อยู่กลุ่มหน้า ไม่ติดตรา)
-    # - รวมทั้งสิ้น >= 2 -> 🚨 เพิ่มกล่อง (คัดแยกไปท้ายเล่ม + ปั๊มตรา EXTRA BOX)
     if total_qty >= 2:
         data["need_split"] = True
         data["boxes"] = total_qty
@@ -305,54 +285,46 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
             progress = processed_pages / total_pages
             progress_bar.progress(progress)
 
-    # ================= SORTING LOGIC =================
-    # need_split = False (0) อยู่หน้าสุด, need_split = True (1) ถูกย้ายไปท้ายเล่ม
-    if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
-        all_pages_data.sort(
-            key=lambda x: (
-                x["need_split"],
-                x["courier"],
-                x["zone"],
-                x["sku"]
-            )
-        )
-    elif sort_mode == "📦 เรียงตามโซน -> SKU":
-        all_pages_data.sort(
-            key=lambda x: (
-                x["need_split"],
-                x["zone"],
-                x["sku"]
-            )
-        )
-    else:
-        all_pages_data.sort(
-            key=lambda x: (
-                x["need_split"],
-                x["sku"]
-            )
-        )
+    # ================= 1. SPLIT INTO 2 GROUPS =================
+    normal_bills = [p for p in all_pages_data if not p["need_split"]]
+    split_bills = [p for p in all_pages_data if p["need_split"]]
 
-    # ================= WRITE PDF & ADD WATERMARK =================
+    # ================= 2. SORT EACH GROUP =================
+    if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
+        normal_bills.sort(key=lambda x: (x["courier"], x["zone"], x["sku"]))
+        split_bills.sort(key=lambda x: (x["courier"], x["zone"], x["sku"]))
+    elif sort_mode == "📦 เรียงตามโซน -> SKU":
+        normal_bills.sort(key=lambda x: (x["zone"], x["sku"]))
+        split_bills.sort(key=lambda x: (x["zone"], x["sku"]))
+    else:
+        normal_bills.sort(key=lambda x: x["sku"])
+        split_bills.sort(key=lambda x: x["sku"])
+
+    # รวมกลุ่ม: บิลปกติไว้หน้า + บิลเพิ่มกล่องไว้หลัง
+    final_pages_data = normal_bills + split_bills
+
+    # ================= 3. WRITE PDF & MERGE WATERMARK =================
     watermark_page = None
 
-    for page_info in all_pages_data:
-        page = page_info["reader_page_ref"]
+    for page_info in final_pages_data:
+        target_page = page_info["reader_page_ref"]
 
         if page_info["need_split"]:
             if watermark_page is None:
-                page_w = float(page.mediabox.width)
-                page_h = float(page.mediabox.height)
+                page_w = float(target_page.mediabox.width)
+                page_h = float(target_page.mediabox.height)
                 watermark_page = create_watermark_page(page_w, page_h)
             
-            page.merge_page(watermark_page)
+            # ปรับปรุงการ Merge ป้องกันปัญหา Object state ของ pypdf
+            target_page.merge_page(watermark_page, expand=False)
 
-        writer.add_page(page)
+        writer.add_page(target_page)
 
     output_pdf = io.BytesIO()
     writer.write(output_pdf)
     output_pdf.seek(0)
 
-    return output_pdf, all_pages_data
+    return output_pdf, final_pages_data
 
 
 # ================= HEADER =================
@@ -409,7 +381,20 @@ if uploaded_files:
                 )
 
             df = pd.DataFrame(details)
-            st.success("🎉 จัดบิลสำเร็จ! (ย้ายรายการรวมทั้งสิ้น >= 2 ไปไว้ท้ายสุดเรียบร้อยแล้ว)")
+            st.success("🎉 จัดบิลสำเร็จ!")
+
+            # ================= DEBUG PANEL (ข้อ 3 & 4 ที่คุณแนะนำ) =================
+            with st.expander("🛠️ DEBUG INFO: ตรวจสอบค่าที่อ่านได้จริงรายหน้า", expanded=True):
+                st.write("ตารางแสดงค่าจากบิลที่จัดเรียงแล้ว (ลำดับบนลงล่างตามไฟล์ PDF ใหม่):")
+                debug_df = df.copy()
+                debug_df["หน้าใน PDF ใหม่"] = debug_df.index + 1
+                st.dataframe(
+                    debug_df[["หน้าใน PDF ใหม่", "order_id", "qty", "need_split", "boxes", "sku"]],
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+            st.markdown("---")
 
             # ================= METRICS =================
 
@@ -450,39 +435,18 @@ if uploaded_files:
             st.subheader("📊 Picking Summary")
 
             if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
-                summary_df = df.groupby(
-                    ["courier", "zone", "sku"]
-                ).agg(
-                    qty=("qty", "sum"),
-                    boxes=("boxes", "sum")
-                ).reset_index()
-
+                summary_df = df.groupby(["courier", "zone", "sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
                 summary_df.columns = ["ขนส่ง", "โซน", "SKU", "จำนวนสินค้า", "จำนวนกล่อง"]
                 summary_df = summary_df.sort_values(by=["ขนส่ง", "โซน", "SKU"])
-
             elif sort_mode == "📦 เรียงตามโซน -> SKU":
-                summary_df = df.groupby(
-                    ["zone", "sku"]
-                ).agg(
-                    qty=("qty", "sum"),
-                    boxes=("boxes", "sum")
-                ).reset_index()
-
+                summary_df = df.groupby(["zone", "sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
                 summary_df.columns = ["โซน", "SKU", "จำนวนสินค้า", "จำนวนกล่อง"]
                 summary_df = summary_df.sort_values(by=["โซน", "SKU"])
-
             else:
-                summary_df = df.groupby(
-                    ["sku"]
-                ).agg(
-                    qty=("qty", "sum"),
-                    boxes=("boxes", "sum")
-                ).reset_index()
-
+                summary_df = df.groupby(["sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
                 summary_df.columns = ["SKU", "จำนวนสินค้า", "จำนวนกล่อง"]
                 summary_df = summary_df.sort_values(by=["SKU"])
 
-            # DOWNLOAD CSV
             csv_data = summary_df.to_csv(index=False).encode("utf-8-sig")
 
             st.download_button(
@@ -493,61 +457,7 @@ if uploaded_files:
                 use_container_width=True
             )
 
-            st.dataframe(
-                summary_df,
-                use_container_width=True,
-                hide_index=True
-            )
-
-            st.markdown("---")
-
-            # ================= SEARCH =================
-
-            st.subheader("🔍 ค้นหาออเดอร์")
-
-            display_df = df.copy()
-            display_df["หน้าใหม่"] = display_df.index + 1
-
-            display_df = display_df[
-                [
-                    "หน้าใหม่",
-                    "track_no", 
-                    "courier",
-                    "zone",
-                    "sku",
-                    "qty",
-                    "boxes",
-                    "box_status",
-                    "order_id"
-                ]
-            ]
-
-            display_df.columns = [
-                "หน้า",
-                "Tracking",
-                "ขนส่ง",
-                "โซน",
-                "SKU",
-                "จำนวน",
-                "จำนวนกล่อง",
-                "สถานะแพ็ก",
-                "Order ID"
-            ]
-
-            search = st.text_input("ค้นหา SKU / Order ID / Tracking / ขนส่ง / สถานะแพ็ก")
-
-            if search:
-                filtered = display_df[
-                    display_df["SKU"].astype(str).str.contains(search, case=False, na=False)
-                    | display_df["Order ID"].astype(str).str.contains(search, case=False, na=False)
-                    | display_df["ขนส่ง"].astype(str).str.contains(search, case=False, na=False)
-                    | display_df["Tracking"].astype(str).str.contains(search, case=False, na=False)
-                    | display_df["สถานะแพ็ก"].astype(str).str.contains(search, case=False, na=False)
-                ]
-
-                st.dataframe(filtered, use_container_width=True, hide_index=True)
-            else:
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
         except Exception as e:
             st.error(f"❌ เกิดข้อผิดพลาด : {e}")
