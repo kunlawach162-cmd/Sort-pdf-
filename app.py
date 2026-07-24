@@ -15,11 +15,11 @@ st.set_page_config(
     layout="wide"
 )
 
-# ================= SESSION =================
+# ================= SESSION STATE =================
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
 
-# ================= CSS =================
+# ================= CUSTOM CSS =================
 st.markdown("""
 <style>
 html, body, [data-testid="stAppViewContainer"] {
@@ -60,7 +60,7 @@ div[data-testid="stFileUploader"] {
 </style>
 """, unsafe_allow_html=True)
 
-# ================= WATERMARK CREATOR (ตำแหน่งตรงกลางล่าง) =================
+# ================= WATERMARK CREATOR =================
 
 def create_watermark_page(width=595, height=842):
     """
@@ -94,21 +94,21 @@ def create_watermark_page(width=595, height=842):
     return PdfReader(packet).pages[0]
 
 
-# ================= FUNCTIONS =================
+# ================= EXTRACTION FUNCTIONS =================
 
 def detect_platform(text):
-    text = text.lower()
-    if "shopee" in text:
+    t = text.lower()
+    if "shopee" in t:
         return "Shopee 🟠"
-    if "lazada" in text or "lada" in text:
+    if "lazada" in t or "lada" in t:
         return "Lazada 🔵"
-    if "tiktok" in text:
+    if "tiktok" in t:
         return "TikTok 🖤"
     return "Unknown"
 
 
 def detect_courier(track_no, source):
-    if not track_no:
+    if not track_no or track_no == "Unknown":
         return "Unknown"
 
     t = track_no.upper()
@@ -175,30 +175,35 @@ def extract_all_skus(text):
         found_skus.append(clean_sku)
 
     seen = set()
-    unique_skus = []
-    for s in found_skus:
-        if s not in seen:
-            seen.add(s)
-            unique_skus.append(s)
+    unique_skus = [s for s in found_skus if not (s in seen or seen.add(s))]
 
     return unique_skus if unique_skus else ["ZZZZZZ"]
 
 
 def extract_grand_total_qty(text):
+    """
+    อ่านยอดรวมแบบ Line-by-Line: สแกนบรรทัดที่มีคำว่า 'รวม' หรือ 'total' แล้วดึงเลขตัวสุดท้าย
+    """
     if not text:
         return 1
 
-    clean_text = text.replace('\xa0', ' ')
+    lines = text.splitlines()
 
-    # 1. ค้นหา "รวมทั้งสิ้น X"
-    total_match = re.search(r'ร\s*ว\s*ม\s*ทั้\s*ง\s*สิ้\s*น\s*[:\=]?\s*(\d{1,3})', clean_text, re.IGNORECASE)
-    if total_match:
-        return int(total_match.group(1))
+    # 1. สแกนหาบรรทัดที่มีคำว่า "รวม"
+    for line in lines:
+        line_str = line.strip()
+        if "รวม" in line_str:
+            nums = re.findall(r"\d+", line_str)
+            if nums:
+                return int(nums[-1])
 
-    # 2. ค้นหา "Total X"
-    total_en_match = re.search(r'Total\s*[:\=]?\s*(\d{1,3})', clean_text, re.IGNORECASE)
-    if total_en_match:
-        return int(total_en_match.group(1))
+    # 2. Fallback ภาษาอังกฤษ (total)
+    for line in lines:
+        line_str = line.strip().lower()
+        if "total" in line_str:
+            nums = re.findall(r"\d+", line_str)
+            if nums:
+                return int(nums[-1])
 
     return 1
 
@@ -215,7 +220,8 @@ def extract_data_from_page(text):
         "order_id": "Unknown",
         "boxes": 1,
         "need_split": False,
-        "box_status": "ปกติ (1 กล่อง)"
+        "box_status": "ปกติ (1 กล่อง)",
+        "raw_text": text
     }
 
     if not text:
@@ -223,10 +229,7 @@ def extract_data_from_page(text):
 
     data["source"] = detect_platform(text)
     data["track_no"] = extract_track(text)
-    data["courier"] = detect_courier(
-        data["track_no"],
-        data["source"]
-    )
+    data["courier"] = detect_courier(data["track_no"], data["source"])
     data["zone"] = extract_zone(text)
     
     extracted_skus = extract_all_skus(text)
@@ -234,11 +237,11 @@ def extract_data_from_page(text):
     data["sku"] = ", ".join(extracted_skus)
     data["order_id"] = extract_order_id(text)
 
-    # อ่านยอด "รวมทั้งสิ้น"
+    # อ่านยอดรวมทั้งสิ้น
     total_qty = extract_grand_total_qty(text)
     data["qty"] = total_qty
 
-    # ------------------ DECISION LOGIC ------------------
+    # ------------------ SPLIT LOGIC ------------------
     if total_qty >= 2:
         data["need_split"] = True
         data["boxes"] = total_qty
@@ -300,7 +303,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
         normal_bills.sort(key=lambda x: x["sku"])
         split_bills.sort(key=lambda x: x["sku"])
 
-    # รวมกลุ่ม: บิลปกติไว้หน้า + บิลเพิ่มกล่องไว้หลัง
+    # รวมกลุ่ม: บิลปกติไว้หน้า + บิลเพิ่มกล่องไว้ท้ายสุด
     final_pages_data = normal_bills + split_bills
 
     # ================= 3. WRITE PDF & MERGE WATERMARK =================
@@ -315,7 +318,6 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
                 page_h = float(target_page.mediabox.height)
                 watermark_page = create_watermark_page(page_w, page_h)
             
-            # ปรับปรุงการ Merge ป้องกันปัญหา Object state ของ pypdf
             target_page.merge_page(watermark_page, expand=False)
 
         writer.add_page(target_page)
@@ -334,7 +336,7 @@ st.caption("ระบบจัดเรียงบิลอัจฉริย�
 
 st.markdown("---")
 
-# ================= SORT MODE =================
+# ================= STEP 1: SORT MODE =================
 
 st.subheader("⚙️ ขั้นตอนที่ 1 : เลือกโหมดจัดเรียง")
 
@@ -350,7 +352,7 @@ sort_mode = st.radio(
 
 st.markdown("---")
 
-# ================= UPLOAD =================
+# ================= STEP 2: UPLOAD =================
 
 st.subheader("📂 ขั้นตอนที่ 2 : อัปโหลด PDF")
 
@@ -383,9 +385,9 @@ if uploaded_files:
             df = pd.DataFrame(details)
             st.success("🎉 จัดบิลสำเร็จ!")
 
-            # ================= DEBUG PANEL (ข้อ 3 & 4 ที่คุณแนะนำ) =================
+            # ================= DEBUG PANEL =================
             with st.expander("🛠️ DEBUG INFO: ตรวจสอบค่าที่อ่านได้จริงรายหน้า", expanded=True):
-                st.write("ตารางแสดงค่าจากบิลที่จัดเรียงแล้ว (ลำดับบนลงล่างตามไฟล์ PDF ใหม่):")
+                st.write("ตารางแสดงค่าจากบิลที่จัดเรียงแล้ว (เรียงจากบนลงล่างตามไฟล์ PDF ใหม่):")
                 debug_df = df.copy()
                 debug_df["หน้าใน PDF ใหม่"] = debug_df.index + 1
                 st.dataframe(
@@ -393,6 +395,19 @@ if uploaded_files:
                     use_container_width=True,
                     hide_index=True
                 )
+                
+                # Raw Text Inspector
+                st.markdown("---")
+                selected_page = st.number_input(
+                    "เลือกหน้าที่ต้องการส่อง Raw Text (1-based)", 
+                    min_value=1, 
+                    max_value=len(df), 
+                    value=1
+                )
+                if selected_page <= len(details):
+                    raw_txt = details[selected_page - 1].get("raw_text", "")
+                    st.caption(f"📄 Raw Text หน้าที่ {selected_page}:")
+                    st.code(repr(raw_txt), language="python")
 
             st.markdown("---")
 
@@ -459,6 +474,56 @@ if uploaded_files:
 
             st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
+            st.markdown("---")
+
+            # ================= SEARCH =================
+
+            st.subheader("🔍 ค้นหาออเดอร์")
+
+            display_df = df.copy()
+            display_df["หน้าใหม่"] = display_df.index + 1
+
+            display_df = display_df[
+                [
+                    "หน้าใหม่",
+                    "track_no", 
+                    "courier",
+                    "zone",
+                    "sku",
+                    "qty",
+                    "boxes",
+                    "box_status",
+                    "order_id"
+                ]
+            ]
+
+            display_df.columns = [
+                "หน้า",
+                "Tracking",
+                "ขนส่ง",
+                "โซน",
+                "SKU",
+                "จำนวน",
+                "จำนวนกล่อง",
+                "สถานะแพ็ก",
+                "Order ID"
+            ]
+
+            search = st.text_input("ค้นหา SKU / Order ID / Tracking / ขนส่ง / สถานะแพ็ก")
+
+            if search:
+                filtered = display_df[
+                    display_df["SKU"].astype(str).str.contains(search, case=False, na=False)
+                    | display_df["Order ID"].astype(str).str.contains(search, case=False, na=False)
+                    | display_df["ขนส่ง"].astype(str).str.contains(search, case=False, na=False)
+                    | display_df["Tracking"].astype(str).str.contains(search, case=False, na=False)
+                    | display_df["สถานะแพ็ก"].astype(str).str.contains(search, case=False, na=False)
+                ]
+
+                st.dataframe(filtered, use_container_width=True, hide_index=True)
+            else:
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+
         except Exception as e:
             st.error(f"❌ เกิดข้อผิดพลาด : {e}")
 
@@ -472,4 +537,3 @@ with col2:
     if st.button("🔄 เริ่มรอบใหม่", use_container_width=True):
         st.session_state.uploader_key += 1
         st.rerun()
-
