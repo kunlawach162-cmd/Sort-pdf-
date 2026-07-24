@@ -64,14 +64,10 @@ div[data-testid="stFileUploader"] {
 # ================= BULKY SKU FILE LOADER =================
 
 def load_bulky_skus_from_file(filename="bulky_skus.txt"):
-    """
-    อ่านไฟล์ bulky_skus.txt จากระบบอัตโนมัติ
-    """
     if os.path.exists(filename):
         try:
             with open(filename, "r", encoding="utf-8") as f:
                 lines = f.readlines()
-            # ลบเว้นวรรค/บรรทัดว่าง
             skus = [s.strip() for s in lines if s.strip()]
             return skus, True
         except Exception as e:
@@ -220,11 +216,7 @@ def extract_grand_total_qty(text):
 
 
 def is_bulky_sku(skus, bulky_list):
-    """
-    ตรวจสอบว่า SKU ในบิลตรงกับสินค้า Bulky (ค้นหาแบบยืดหยุ่นไม่สนขีด/เว้นวรรค)
-    """
     if not bulky_list:
-        # หากไม่มีรายการ Bulky ให้ถือว่าจำนวน >= 2 ต้องแยกกล่องทั้งหมด
         return True
 
     for sku in skus:
@@ -248,8 +240,7 @@ def extract_data_from_page(text, bulky_list):
         "order_id": "Unknown",
         "boxes": 1,
         "need_split": False,
-        "box_status": "ปกติ (1 กล่อง)",
-        "raw_text": text
+        "box_status": "ปกติ (1 กล่อง)"
     }
 
     if not text:
@@ -271,12 +262,10 @@ def extract_data_from_page(text, bulky_list):
 
     # 2. DECISION LOGIC
     if total_qty == 1:
-        # ยอดรวมเท่ากับ 1 ชิ้น -> สรุปทันที: บิลปกติ
         data["need_split"] = False
         data["boxes"] = 1
         data["box_status"] = "✅ ปกติ (1 กล่อง)"
     else:
-        # ตั้งแต่ 2 ชิ้นขึ้นไป -> ตรวจหา Bulky SKU
         if is_bulky_sku(extracted_skus, bulky_list):
             data["need_split"] = True
             data["boxes"] = total_qty
@@ -323,11 +312,9 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_list):
             progress = processed_pages / total_pages
             progress_bar.progress(progress)
 
-    # แยกบิลปกติ และ บิลเพิ่มกล่อง
     normal_bills = [p for p in all_pages_data if not p["need_split"]]
     split_bills = [p for p in all_pages_data if p["need_split"]]
 
-    # จัดเรียงบิล
     if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
         normal_bills.sort(key=lambda x: (x["courier"], x["zone"], x["sku"]))
         split_bills.sort(key=lambda x: (x["courier"], x["zone"], x["sku"]))
@@ -340,7 +327,6 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_list):
 
     final_pages_data = normal_bills + split_bills
 
-    # เขียน PDF + แปะลายน้ำ EXTRA BOX เฉพาะกลุ่มท้ายเล่ม
     watermark_page = None
 
     for page_info in final_pages_data:
@@ -450,18 +436,6 @@ if uploaded_files:
                     use_container_width=True,
                     hide_index=True
                 )
-                
-                st.markdown("---")
-                selected_page = st.number_input(
-                    "เลือกหน้าที่ต้องการส่อง Raw Text (1-based)", 
-                    min_value=1, 
-                    max_value=len(df), 
-                    value=1
-                )
-                if selected_page <= len(details):
-                    raw_txt = details[selected_page - 1].get("raw_text", "")
-                    st.caption(f"📄 Raw Text หน้าที่ {selected_page}:")
-                    st.code(repr(raw_txt), language="python")
 
             st.markdown("---")
 
@@ -591,3 +565,4 @@ with col2:
     if st.button("🔄 เริ่มรอบใหม่", use_container_width=True):
         st.session_state.uploader_key += 1
         st.rerun()
+
