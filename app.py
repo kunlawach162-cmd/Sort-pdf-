@@ -81,26 +81,26 @@ def load_bulky_skus(file_path="bulky_skus.txt"):
     return set()
 
 
-# ================= WATERMARK CREATOR (ปรับขนาดให้เล็กลง ไม่บังตาราง) =================
+# ================= WATERMARK CREATOR (ปรับตำแหน่งให้อยู่ ตรงกลางล่าง) =================
 
 def create_watermark_page(width=595, height=842):
     """
-    สร้างตราปั๊ม 'EXTRA BOX' ขนาดพอดี ไม่บังตัวหนังสือสำคัญในบิล
+    สร้างตราปั๊ม 'EXTRA BOX' วางไว้ตรงกลางด้านล่างของหน้ากระดาษ
     """
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(width, height))
     
     c.saveState()
     
-    # กำหนดขนาดตราปั๊มให้พอดี ไม่ใหญ่เกินไป
-    stamp_w, stamp_h = 140, 38
+    # กำหนดขนาดตราปั๊ม
+    stamp_w, stamp_h = 160, 42
     
-    # วางไว้ตำแหน่ง มุมขวาบน ของใบสั่งซื้อ (พ้นจากตาราง SKU และบาร์โค้ด)
-    x_pos = width - stamp_w - 35
-    y_pos = height - stamp_h - 35
+    # ตำแหน่ง: ตรงกลางแนวนอน (width / 2) และ อยู่ขอบล่าง (เว้นจากขอบล่างขึ้นมา 50 pt)
+    x_pos = width / 2
+    y_pos = 50
     
-    c.translate(x_pos + stamp_w / 2, y_pos + stamp_h / 2)
-    c.rotate(-8)  # เอียงเล็กน้อยพอสวยงาม (8 องศา)
+    c.translate(x_pos, y_pos)
+    c.rotate(-5)  # เอียงเล็กน้อย 5 องศา พอสวยงามสไตล์ตราปั๊ม
     
     # วาดกรอบตราปั๊มสีแดง
     c.setStrokeColor(colors.HexColor("#DC2626"))
@@ -109,7 +109,7 @@ def create_watermark_page(width=595, height=842):
     c.roundRect(-stamp_w / 2, -stamp_h / 2, stamp_w, stamp_h, 8, stroke=1, fill=1)
     
     # ข้อความตราปั๊ม
-    c.setFont("Helvetica-Bold", 15)
+    c.setFont("Helvetica-Bold", 16)
     c.setFillColor(colors.HexColor("#DC2626"))
     c.drawCentredString(0, -5, "EXTRA BOX")
         
@@ -188,7 +188,6 @@ def extract_order_id(text):
     return "Unknown"
 
 
-# --- รองรับการดึงหลาย SKU ใน 1 หน้าบิล ---
 def extract_all_skus(text):
     """
     ดึง SKU ทุกตัวที่ปรากฏในบิลใบเดียวกัน
@@ -203,7 +202,6 @@ def extract_all_skus(text):
         if matches:
             found_skus.extend(matches)
             
-    # ตัดรายการ SKU ซ้ำโดยยังคงลำดับเดิมไว้
     seen = set()
     unique_skus = []
     for s in found_skus:
@@ -267,10 +265,9 @@ def extract_data_from_page(text, bulky_skus):
     )
     data["zone"] = extract_zone(text)
     
-    # ดึง SKU ทั้งหมดในหน้าบิล
     extracted_skus = extract_all_skus(text)
     data["all_skus"] = extracted_skus
-    data["sku"] = ", ".join(extracted_skus)  # รวม SKU แสดงในตาราง
+    data["sku"] = ", ".join(extracted_skus)
 
     data["qty"] = extract_qty(text)
     data["order_id"] = extract_order_id(text)
@@ -383,7 +380,7 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_skus):
 # ================= HEADER =================
 
 st.title("📦 Sharp Bill Sorter")
-st.caption("ระบบจัดเรียงบิลอัจฉริยะ (รองรับหลาย SKU ในบิลเดียว + ปั๊มตรา EXTRA BOX มุมขวาบน)")
+st.caption("ระบบจัดเรียงบิลอัจฉริยะ (รองรับหลาย SKU ในบิลเดียว + ปั๊มตรา EXTRA BOX ตรงกลางล่าง)")
 
 # โหลดรายการ Bulky SKUs
 bulky_skus = load_bulky_skus("bulky_skus.txt")
