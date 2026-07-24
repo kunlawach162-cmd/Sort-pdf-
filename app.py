@@ -96,7 +96,7 @@ def create_watermark_page(width=595, height=842):
     y_pos = 50
     
     c.translate(x_pos, y_pos)
-    c.rotate(-5)  # เอียงเล็กน้อย 5 องศา
+    c.rotate(-5)
     
     c.setStrokeColor(colors.HexColor("#DC2626"))
     c.setFillColor(colors.HexColor("#FEF2F2"))
@@ -184,7 +184,7 @@ def extract_order_id(text):
 
 def extract_all_skus(text):
     """
-    ดึง SKU ทุกตัวที่มีในบิล (รองรับรูปแบบ 1-GDS-SHARP-000000525)
+    ดึง SKU ทุกตัวที่มีในบิล (รองรับรูปแบบ 1-GDS-SHARP-000000509)
     """
     if not text:
         return ["ZZZZZZ"]
@@ -192,25 +192,20 @@ def extract_all_skus(text):
     clean_text = text.replace('\xa0', ' ')
     found_skus = []
 
-    # ดึงรหัสสินค้า 1-GDS-xxx-xxxx
     matches = re.findall(r'1\s*-\s*GDS\s*-\s*[A-Z0-9\s\-]+', clean_text, re.IGNORECASE)
     for m in matches:
-        # สกัดเอาเฉพาะส่วนรหัสก่อนถึงคำอธิบายภาษาไทยหรือบาร์โค้ด
         raw_sku = m.split()[0] if ' ' in m else m
         clean_sku = re.sub(r'\s+', '', raw_sku).upper()
-        # ตัดส่วนเกินถ้าติดบาร์โค้ดมา
         clean_sku = re.sub(r'(885\d+).*$', '', clean_sku)
         clean_sku = clean_sku.rstrip('-')
         
         if len(clean_sku) >= 10:
             found_skus.append(clean_sku)
 
-    # สำรอง: ค้นหาด้วย pattern ชัดเจน
     if not found_skus:
         alt_matches = re.findall(r'1-GDS-[A-Z0-9\-]+', clean_text.replace(" ", "").upper())
         found_skus.extend(alt_matches)
 
-    # ลบรายการ SKU ซ้ำโดยยังคงลำดับเดิมไว้
     seen = set()
     unique_skus = []
     for s in found_skus:
@@ -221,26 +216,29 @@ def extract_all_skus(text):
     return unique_skus if unique_skus else ["ZZZZZZ"]
 
 
-def extract_qty(text):
+def extract_grand_total_qty(text):
     """
-    อ่านจำนวนสินค้ารวมในบิล
+    อ่านยอด 'รวมทั้งสิ้น' ล่างสุดของบิลเป็นหลัก 100%
     """
     if not text:
         return 1
         
     clean_text = text.replace('\xa0', ' ')
 
-    # 1. อ่านจาก "รวมทั้งสิ้น X"
-    total_match = re.search(r'(?:รวมทั้งสิ้น|Total|รวม)\s*[:\=]?\s*(\d{1,3})', clean_text, re.IGNORECASE)
+    # 1. ค้นหา "รวมทั้งสิ้น X" (รองรับช่องว่างภาษาไทย)
+    total_match = re.search(r'ร\s*ว\s*ม\s*ทั้\s*ง\s*สิ้\s*น\s*[:\=]?\s*(\d{1,3})', clean_text, re.IGNORECASE)
     if total_match:
         return int(total_match.group(1))
 
-    # 2. นับรวมจากตารางรายการ (เช่น O - 1, W - 1)
-    line_qtys = re.findall(r'\b[A-Z0-9]{1,3}\s*[\-\s]+\s*(\d{1,2})\b', clean_text)
+    # 2. ค้นหา Total
+    total_en_match = re.search(r'Total\s*[:\=]?\s*(\d{1,3})', clean_text, re.IGNORECASE)
+    if total_en_match:
+        return int(total_en_match.group(1))
+
+    # 3. สำรองกรณีหาคำว่ารวมทั้งสิ้นไม่เจอจริงๆ ค่อยรวมจากตาราง QTY (A - 1)
+    line_qtys = re.findall(r'\b[A-Z]\s*-\s*(\d{1,2})\b', clean_text)
     if line_qtys:
-        sum_qty = sum(int(q) for q in line_qtys if 1 <= int(q) <= 50)
-        if sum_qty > 0:
-            return sum_qty
+        return sum(int(q) for q in line_qtys)
 
     return 1
 
@@ -272,28 +270,31 @@ def extract_data_from_page(text, bulky_skus):
     )
     data["zone"] = extract_zone(text)
     
-    # ดึง SKU ทั้งหมดในหน้าบิล
     extracted_skus = extract_all_skus(text)
     data["all_skus"] = extracted_skus
     data["sku"] = ", ".join(extracted_skus)
-
-    data["qty"] = extract_qty(text)
     data["order_id"] = extract_order_id(text)
 
-    # --- ตรวจสอบเงื่อนไข Bulky ---
+    # ------------------ NEW LOGIC BY GRAND TOTAL ------------------
+    # 1. ดึงยอด "รวมทั้งสิ้น" เป็นหลัก
+    total_qty = extract_grand_total_qty(text)
+    data["qty"] = total_qty
+
+    # 2. เช็คว่ามีสินค้า Bulky หรือไม่
     bulky_found = [s for s in extracted_skus if s in bulky_skus]
     data["is_bulky"] = len(bulky_found) > 0
-    
-    # เงื่อนไขใหม่: มีสินค้า Bulky และจำนวนรวมตั้งแต่ 2 ชิ้นขึ้นไป (>= 2)
-    # เช่น พัดลม 2 ตัว หรือ พัดลม + สินค้าอื่น -> แยกไปอยู่กลุ่ม "เพิ่มกล่อง" ทันที
-    if data["is_bulky"] and data["qty"] >= 2:
-        data["need_split"] = True
-        data["boxes"] = data["qty"]
-        data["box_status"] = f"🚨 เพิ่มกล่อง ({data['qty']} กล่อง)"
-    elif data["is_bulky"]:
+
+    # 3. เงื่อนไขตัดสินใจการปั๊มลายน้ำ EXTRA BOX:
+    # - ถ้า รวมทั้งสิ้น == 1 -> ปลอดภัย! เป็นออเดอร์เดี่ยว ไม่ติดลายน้ำแน่นอน 100%
+    # - ถ้า รวมทั้งสิ้น >= 2 AND มีสินค้า Bulky -> ติดลายน้ำ EXTRA BOX + ย้ายไปท้ายสุด
+    if total_qty == 1:
         data["need_split"] = False
         data["boxes"] = 1
-        data["box_status"] = "⚠️ สินค้าใหญ่ (1 ชิ้น)"
+        data["box_status"] = "✅ ปกติ (1 กล่อง)"
+    elif data["is_bulky"] and total_qty >= 2:
+        data["need_split"] = True
+        data["boxes"] = total_qty
+        data["box_status"] = f"🚨 เพิ่มกล่อง ({total_qty} กล่อง)"
     else:
         data["need_split"] = False
         data["boxes"] = 1
@@ -597,4 +598,3 @@ with col2:
     if st.button("🔄 เริ่มรอบใหม่", use_container_width=True):
         st.session_state.uploader_key += 1
         st.rerun()
-
