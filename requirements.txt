@@ -6,3 +6,4 @@ pdfplumber
 pypdf
 pdfminer-six
 pypdfium2
+reportLab
