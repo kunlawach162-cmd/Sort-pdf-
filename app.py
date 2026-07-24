@@ -73,10 +73,9 @@ div[data-testid="stFileUploader"] {
 
 @st.cache_data
 def load_bulky_skus(file_path="bulky_skus.txt"):
-    """โหลด รายการ SKU สินค้าชิ้นใหญ่จากไฟล์ bulky_skus.txt พร้อมทำความสะอาดข้อความ"""
+    """โหลด รายการ SKU สินค้าชิ้นใหญ่จากไฟล์ bulky_skus.txt"""
     if os.path.exists(file_path):
         with open(file_path, "r", encoding="utf-8") as f:
-            # แปลงเป็น ตัวพิมพ์ใหญ่ และ ตัดช่องว่าง เพื่อให้เทียบรหัสตรงกัน 100%
             return set(re.sub(r'\s+', '', line.strip()).upper() for line in f if line.strip())
     return set()
 
@@ -185,37 +184,31 @@ def extract_order_id(text):
 
 def extract_all_skus(text):
     """
-    ดึง SKU ทุกตัวที่มีในบิล โดยปรับแก้ให้ทนต่อปัญหา PDF แทรกช่องว่าง/ตัดบรรทัด
+    ดึง SKU ทุกตัวที่มีในบิล (รองรับรูปแบบ 1-GDS-SHARP-000000525)
     """
     if not text:
         return ["ZZZZZZ"]
 
+    clean_text = text.replace('\xa0', ' ')
     found_skus = []
 
-    # 1. Regex รูปแบบยืดหยุ่น ยอมรับช่องว่างรอบขีด -
-    patterns = [
-        r'(1\s*-\s*GDS\s*-\s*SHARP\s*-\s*[A-Z0-9]+)',   # รูปแบบ 1-GDS-SHARP-xxxxxx
-        r'(1\s*-\s*GDS\s*-\s*[A-Z0-9\-]+)',             # รูปแบบ 1-GDS-xxxx
-        r'(\d+\s*-\s*[A-Z]+\s*-\s*[A-Z0-9\-]+)'         # รูปแบบ ตัวเลข-ตัวอักษร-รหัส
-    ]
+    # ดึงรหัสสินค้า 1-GDS-xxx-xxxx
+    matches = re.findall(r'1\s*-\s*GDS\s*-\s*[A-Z0-9\s\-]+', clean_text, re.IGNORECASE)
+    for m in matches:
+        # สกัดเอาเฉพาะส่วนรหัสก่อนถึงคำอธิบายภาษาไทยหรือบาร์โค้ด
+        raw_sku = m.split()[0] if ' ' in m else m
+        clean_sku = re.sub(r'\s+', '', raw_sku).upper()
+        # ตัดส่วนเกินถ้าติดบาร์โค้ดมา
+        clean_sku = re.sub(r'(885\d+).*$', '', clean_sku)
+        clean_sku = clean_sku.rstrip('-')
+        
+        if len(clean_sku) >= 10:
+            found_skus.append(clean_sku)
 
-    for pattern in patterns:
-        matches = re.findall(pattern, text, re.IGNORECASE)
-        for m in matches:
-            # ทำความสะอาดรหัส: ลบช่องว่างทั้งหมดออก และเปลี่ยนเป็นตัวพิมพ์ใหญ่
-            clean_sku = re.sub(r'\s+', '', m).upper()
-            if clean_sku and len(clean_sku) >= 8:
-                found_skus.append(clean_sku)
-
-    # 2. สำรอง: หาก Regex ด้านบนไม่เจอ ให้ค้นหาบรรทัดที่มีคำว่า GDS หรือ SHARP
+    # สำรอง: ค้นหาด้วย pattern ชัดเจน
     if not found_skus:
-        for line in text.splitlines():
-            if "GDS" in line.upper() or "SHARP" in line.upper():
-                words = line.split()
-                for w in words:
-                    clean_w = re.sub(r'\s+', '', w).upper()
-                    if "1-GDS" in clean_w or ("SHARP" in clean_w and "-" in clean_w):
-                        found_skus.append(clean_w)
+        alt_matches = re.findall(r'1-GDS-[A-Z0-9\-]+', clean_text.replace(" ", "").upper())
+        found_skus.extend(alt_matches)
 
     # ลบรายการ SKU ซ้ำโดยยังคงลำดับเดิมไว้
     seen = set()
@@ -229,27 +222,25 @@ def extract_all_skus(text):
 
 
 def extract_qty(text):
-    lines = text.splitlines()
-    for line in lines:
-        line = line.strip()
-        match = re.match(
-            r'^[A-Z]{1,3}\s+(\d{1,3})$',
-            line
-        )
-        if match:
-            qty = int(match.group(1))
-            if 1 <= qty <= 50:
-                return qty
+    """
+    อ่านจำนวนสินค้ารวมในบิล
+    """
+    if not text:
+        return 1
+        
+    clean_text = text.replace('\xa0', ' ')
 
-    full_text = text.replace("\n", " ")
-    total_match = re.search(
-        r'รวมทั้งสิ้น\s*(\d{1,3})',
-        full_text
-    )
+    # 1. อ่านจาก "รวมทั้งสิ้น X"
+    total_match = re.search(r'(?:รวมทั้งสิ้น|Total|รวม)\s*[:\=]?\s*(\d{1,3})', clean_text, re.IGNORECASE)
     if total_match:
-        qty = int(total_match.group(1))
-        if 1 <= qty <= 50:
-            return qty
+        return int(total_match.group(1))
+
+    # 2. นับรวมจากตารางรายการ (เช่น O - 1, W - 1)
+    line_qtys = re.findall(r'\b[A-Z0-9]{1,3}\s*[\-\s]+\s*(\d{1,2})\b', clean_text)
+    if line_qtys:
+        sum_qty = sum(int(q) for q in line_qtys if 1 <= int(q) <= 50)
+        if sum_qty > 0:
+            return sum_qty
 
     return 1
 
@@ -284,24 +275,25 @@ def extract_data_from_page(text, bulky_skus):
     # ดึง SKU ทั้งหมดในหน้าบิล
     extracted_skus = extract_all_skus(text)
     data["all_skus"] = extracted_skus
-    data["sku"] = ", ".join(extracted_skus)  # รวม SKU แสดงในรายการ
+    data["sku"] = ", ".join(extracted_skus)
 
     data["qty"] = extract_qty(text)
     data["order_id"] = extract_order_id(text)
 
-    # --- ตรวจสอบเงื่อนไข Multi-SKU และ Bulky ---
+    # --- ตรวจสอบเงื่อนไข Bulky ---
     bulky_found = [s for s in extracted_skus if s in bulky_skus]
     data["is_bulky"] = len(bulky_found) > 0
     
-    # เงื่อนไข: มีสินค้า Bulky ในบิล และจำนวนสินค้ารวมในบิล > 2 ชิ้น
-    if data["is_bulky"] and data["qty"] > 2:
+    # เงื่อนไขใหม่: มีสินค้า Bulky และจำนวนรวมตั้งแต่ 2 ชิ้นขึ้นไป (>= 2)
+    # เช่น พัดลม 2 ตัว หรือ พัดลม + สินค้าอื่น -> แยกไปอยู่กลุ่ม "เพิ่มกล่อง" ทันที
+    if data["is_bulky"] and data["qty"] >= 2:
         data["need_split"] = True
         data["boxes"] = data["qty"]
         data["box_status"] = f"🚨 เพิ่มกล่อง ({data['qty']} กล่อง)"
     elif data["is_bulky"]:
         data["need_split"] = False
         data["boxes"] = 1
-        data["box_status"] = "⚠️ สินค้าใหญ่ (1-2 ชิ้น)"
+        data["box_status"] = "⚠️ สินค้าใหญ่ (1 ชิ้น)"
     else:
         data["need_split"] = False
         data["boxes"] = 1
@@ -605,3 +597,4 @@ with col2:
     if st.button("🔄 เริ่มรอบใหม่", use_container_width=True):
         st.session_state.uploader_key += 1
         st.rerun()
+
