@@ -299,32 +299,36 @@ def process_multiple_pdfs(uploaded_files, sort_mode):
 
             progress_bar.progress(progress)
 
-    # SORT
-    if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
+# SORT
+if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
 
-        all_pages_data.sort(
-            key=lambda x: (
-                x["courier"],
-                x["zone"],
-                x["sku"]
-            )
+    all_pages_data.sort(
+        key=lambda x: (
+            x["qty"] >= 2,
+            x["courier"],
+            x["zone"],
+            x["sku"]
         )
+    )
 
-    elif sort_mode == "📦 เรียงตามโซน -> SKU":
+elif sort_mode == "📦 เรียงตามโซน -> SKU":
 
-        all_pages_data.sort(
-            key=lambda x: (
-                x["zone"],
-                x["sku"]
-            )
+    all_pages_data.sort(
+        key=lambda x: (
+            x["qty"] >= 2,
+            x["zone"],
+            x["sku"]
         )
+    )
 
-    else:
+else:
 
-        all_pages_data.sort(
-            key=lambda x: x["sku"]
+    all_pages_data.sort(
+        key=lambda x: (
+            x["qty"] >= 2,
+            x["sku"]
         )
-
+    )
     # WRITE PDF
     for page_info in all_pages_data:
 
