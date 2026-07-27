@@ -19,14 +19,12 @@ st.set_page_config(
 # ================= SESSION STATE =================
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
-if "analyze_count" not in st.session_state:
-    st.session_state.analyze_count = 0          # ใช้รีเซ็ตตาราง editor เมื่ออ่านข้อมูลรอบใหม่
-if "pages_data" not in st.session_state:
-    st.session_state.pages_data = None          # ข้อมูลที่อ่านได้รายหน้า (จากขั้นตอนอ่านข้อมูล)
+if "editor_version" not in st.session_state:
+    st.session_state.editor_version = 0     # ใช้รีเซ็ตสถานะติ๊กของตาราง DEBUG หลังอัปเดตแต่ละรอบ
 if "file_store" not in st.session_state:
-    st.session_state.file_store = []            # bytes ของ PDF ต้นฉบับ (ไว้สร้างไฟล์ตอนกดจัดบิล)
+    st.session_state.file_store = []        # bytes ของ PDF ต้นฉบับ (ไว้สร้างไฟล์ใหม่ตอนแก้ติ๊ก)
 if "result" not in st.session_state:
-    st.session_state.result = None              # ผลลัพธ์หลังจัดบิล {"pdf", "df", "sort_mode"}
+    st.session_state.result = None          # ผลลัพธ์ปัจจุบัน {"pdf", "pages", "sort_mode"}
 
 # ================= CUSTOM CSS =================
 st.markdown("""
@@ -87,7 +85,7 @@ def load_bulky_skus_from_file(filename="bulky_skus.txt"):
 # ================= WATERMARK CREATOR =================
 
 def create_watermark_reader(width=595, height=842):
-    """สร้างหน้าลายน้ำ EXTRA BOX -> คืนค่าเป็น PdfReader ทั้งตัว (กันโดน GC เก็บระหว่าง merge)"""
+    """สร้างหน้าลายน้ำ EXTRA BOX -> คืน PdfReader ทั้งตัว (กันโดน GC เก็บระหว่าง merge)"""
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(width, height))
 
@@ -283,9 +281,10 @@ def extract_data_from_page(text, bulky_list):
     return data
 
 
-# ================= STEP A : อ่านข้อมูลทุกหน้า =================
+# ================= CORE STEPS =================
 
 def analyze_pdfs(uploaded_files, bulky_list):
+    """อ่านข้อความทุกหน้าจากทุกไฟล์ -> คืน (ข้อมูลรายหน้า, bytes ของไฟล์ต้นฉบับ)"""
     file_store = []
     readers = []
     total_pages = 0
@@ -316,10 +315,8 @@ def analyze_pdfs(uploaded_files, bulky_list):
     return pages_data, file_store
 
 
-# ================= STEP B : รวมค่าติ๊กของผู้ใช้ =================
-
 def apply_manual_split(pages_data, manual_flags):
-    """เอาค่าติ๊กจากตาราง (ผู้ใช้แก้ได้) มาทับ need_split แล้วคำนวณกล่อง/สถานะใหม่"""
+    """เอาค่าติ๊กจากตาราง DEBUG มาทับ need_split แล้วคำนวณกล่อง/สถานะใหม่"""
     updated = []
     for p, flag in zip(pages_data, manual_flags):
         q = dict(p)
@@ -334,10 +331,9 @@ def apply_manual_split(pages_data, manual_flags):
     return updated
 
 
-# ================= STEP C : จัดเรียง + ปั๊มตรา + สร้าง PDF =================
-
 def build_sorted_pdf(pages_data, sort_mode, file_store):
-    # เปิด reader ใหม่จาก bytes ทุกครั้ง -> ไม่มีปัญหาปั๊มตราซ้ำเวลากดสร้างหลายรอบ
+    """จัดเรียง (ปกติก่อน, เพิ่มกล่องท้ายเล่ม) + ปั๊มตรา + สร้าง PDF"""
+    # เปิด reader ใหม่จาก bytes ทุกครั้ง -> กดอัปเดตซ้ำกี่รอบตราก็ไม่ปั๊มซ้อน
     readers = [PdfReader(io.BytesIO(b)) for b in file_store]
 
     normal_bills = [p for p in pages_data if not p["need_split"]]
@@ -356,7 +352,7 @@ def build_sorted_pdf(pages_data, sort_mode, file_store):
     final_pages_data = normal_bills + split_bills
 
     writer = PdfWriter()
-    wm_cache = {}  # (กว้าง, สูง) -> reader ลายน้ำ (รองรับหน้าไซซ์ต่างกันในไฟล์เดียว)
+    wm_cache = {}  # (กว้าง, สูง) -> reader ลายน้ำ (รองรับหน้าไซซ์ต่างกัน)
 
     for page_info in final_pages_data:
         target_page = readers[page_info["file_index"]].pages[page_info["page_index"]]
@@ -382,7 +378,7 @@ def build_sorted_pdf(pages_data, sort_mode, file_store):
 # ================= HEADER =================
 
 st.title("📦 Sharp Bill Sorter")
-st.caption("ระบบจัดเรียงบิลอัจฉริยะ (เช็คยอดรวม -> ตรวจหา Bulky SKU -> ติ๊กปรับเองได้ -> แยกไว้ท้ายเล่ม + ปั๊มตรา EXTRA BOX)")
+st.caption("ระบบจัดเรียงบิลอัจฉริยะ (เช็คยอดรวม -> ตรวจหา Bulky SKU -> แยกไว้ท้ายเล่ม + ปั๊มตรา EXTRA BOX | ติ๊กปรับเองได้ใน DEBUG INFO)")
 
 st.markdown("---")
 
@@ -422,9 +418,9 @@ sort_mode = st.radio(
 
 st.markdown("---")
 
-# ================= STEP 2: UPLOAD + อ่านข้อมูล =================
+# ================= STEP 2: UPLOAD =================
 
-st.subheader("📂 ขั้นตอนที่ 2 : อัปโหลด PDF แล้วอ่านข้อมูล")
+st.subheader("📂 ขั้นตอนที่ 2 : อัปโหลด PDF")
 
 uploaded_files = st.file_uploader(
     "ลากไฟล์ PDF มาวางตรงนี้",
@@ -433,84 +429,30 @@ uploaded_files = st.file_uploader(
     key=f"uploader_{st.session_state.uploader_key}"
 )
 
+# ================= PROCESS =================
+
 if uploaded_files:
+
     st.info(f"🗂️ พบไฟล์ทั้งหมด {len(uploaded_files)} ไฟล์")
 
-    if st.button("🔍 อ่านข้อมูลบิลทั้งหมด", type="primary", use_container_width=True):
+    if st.button(
+        "⚡ เริ่มจัดบิล",
+        type="primary",
+        use_container_width=True
+    ):
         try:
-            with st.spinner("⏳ กำลังอ่านข้อมูลจากทุกหน้า..."):
+            with st.spinner("⏳ กำลังประมวลผล คัดแยกออเดอร์ตามเงื่อนไข และประทับตราลายน้ำ..."):
                 pages_data, file_store = analyze_pdfs(uploaded_files, bulky_list)
+                pdf_bytes, final_pages = build_sorted_pdf(pages_data, sort_mode, file_store)
 
-            st.session_state.pages_data = pages_data
             st.session_state.file_store = file_store
-            st.session_state.result = None
-            st.session_state.analyze_count += 1
-            st.rerun()
-
-        except Exception as e:
-            st.error(f"❌ อ่านไฟล์ไม่สำเร็จ : {e}")
-
-# ================= STEP 3: ตารางติ๊กเอง =================
-
-if st.session_state.pages_data:
-
-    st.markdown("---")
-    st.subheader("✅ ขั้นตอนที่ 3 : ตรวจสอบ / ติ๊กปรับ 'เพิ่มกล่อง' เอง")
-    st.caption(
-        "ระบบติ๊กให้อัตโนมัติตามเงื่อนไขเดิม (ยอด > 1 และเป็น Bulky SKU) "
-        "— ติ๊กเพิ่มเพื่อบังคับปั๊มตรา EXTRA BOX + ย้ายไปท้ายเล่ม / เอาติ๊กออกเพื่อให้เป็นบิลปกติ"
-    )
-
-    src_df = pd.DataFrame(st.session_state.pages_data)
-
-    edit_df = pd.DataFrame({
-        "หน้าเดิม": range(1, len(src_df) + 1),
-        "Order ID": src_df["order_id"],
-        "Tracking": src_df["track_no"],
-        "ขนส่ง": src_df["courier"],
-        "โซน": src_df["zone"],
-        "SKU": src_df["sku"],
-        "จำนวน": src_df["qty"],
-        "🚨 เพิ่มกล่อง": src_df["need_split"].astype(bool),
-    })
-
-    edited_df = st.data_editor(
-        edit_df,
-        column_config={
-            "🚨 เพิ่มกล่อง": st.column_config.CheckboxColumn(
-                "🚨 เพิ่มกล่อง",
-                help="ติ๊ก = ปั๊มตรา EXTRA BOX และย้ายบิลนี้ไปท้ายเล่ม"
-            ),
-        },
-        disabled=["หน้าเดิม", "Order ID", "Tracking", "ขนส่ง", "โซน", "SKU", "จำนวน"],
-        hide_index=True,
-        use_container_width=True,
-        key=f"split_editor_{st.session_state.analyze_count}"
-    )
-
-    manual_flags = edited_df["🚨 เพิ่มกล่อง"].tolist()
-    ticked = int(sum(manual_flags))
-    st.info(f"🚨 ตอนนี้ติ๊ก 'เพิ่มกล่อง' ไว้ {ticked} บิล จากทั้งหมด {len(manual_flags)} บิล")
-
-    # ================= STEP 4: สร้าง PDF =================
-
-    if st.button("⚡ ขั้นตอนที่ 4 : จัดบิล + สร้าง PDF", type="primary", use_container_width=True):
-        try:
-            with st.spinner("⏳ กำลังจัดเรียง ประทับตรา และสร้างไฟล์..."):
-                updated_pages = apply_manual_split(st.session_state.pages_data, manual_flags)
-                pdf_bytes, final_pages = build_sorted_pdf(
-                    updated_pages,
-                    sort_mode,
-                    st.session_state.file_store
-                )
-
-            result_df = pd.DataFrame(final_pages)
             st.session_state.result = {
                 "pdf": pdf_bytes,
-                "df": result_df,
+                "pages": final_pages,
                 "sort_mode": sort_mode
             }
-            st.success("🎉 จัดบิลสำเร็จเรียบร้อย!")
+            st.session_state.editor_version += 1
+            st.rerun()
 
         except Exception as e:
             st.error(f"❌ เกิดข้อผิดพลาด : {e}")
@@ -519,21 +461,71 @@ if st.session_state.pages_data:
 
 if st.session_state.result:
 
-    df = st.session_state.result["df"]
-    result_sort_mode = st.session_state.result["sort_mode"]
+    res = st.session_state.result
+    df = pd.DataFrame(res["pages"])
 
     st.markdown("---")
+    st.success("🎉 จัดบิลเรียบร้อย! ตรวจสอบ/ติ๊กปรับได้ใน DEBUG INFO ด้านล่าง")
 
-    # ================= DEBUG PANEL =================
-    with st.expander("🛠️ DEBUG INFO: ตรวจสอบค่าที่อ่านได้จริงรายหน้า", expanded=False):
+    # ================= DEBUG PANEL (ติ๊กได้) =================
+    with st.expander("🛠️ DEBUG INFO: ตรวจสอบค่าที่อ่านได้จริงรายหน้า (ติ๊ก need_split ปรับเองได้)", expanded=False):
         st.write("ตารางแสดงค่าจากบิลที่จัดเรียงแล้ว (เรียงจากบนลงล่างตามไฟล์ PDF ใหม่):")
-        debug_df = df.copy()
-        debug_df["หน้าใน PDF ใหม่"] = debug_df.index + 1
-        st.dataframe(
-            debug_df[["หน้าใน PDF ใหม่", "order_id", "qty", "need_split", "boxes", "sku"]],
+        st.caption("✏️ ติ๊ก/เอาติ๊กออกในช่อง need_split ได้เลย แล้วกดปุ่มอัปเดตด้านล่างตาราง — บิลที่ติ๊กจะโดนปั๊มตรา EXTRA BOX และย้ายไปท้ายเล่ม")
+
+        debug_df = pd.DataFrame({
+            "หน้าใน PDF ใหม่": range(1, len(df) + 1),
+            "order_id": df["order_id"],
+            "qty": df["qty"],
+            "need_split": df["need_split"].astype(bool),
+            "boxes": df["boxes"],
+            "sku": df["sku"],
+        })
+
+        edited_df = st.data_editor(
+            debug_df,
+            column_config={
+                "need_split": st.column_config.CheckboxColumn(
+                    "need_split",
+                    help="ติ๊ก = ปั๊มตรา EXTRA BOX + ย้ายไปท้ายเล่ม"
+                ),
+            },
+            disabled=["หน้าใน PDF ใหม่", "order_id", "qty", "boxes", "sku"],
+            hide_index=True,
             use_container_width=True,
-            hide_index=True
+            key=f"debug_editor_{st.session_state.editor_version}"
         )
+
+        new_flags = [bool(x) for x in edited_df["need_split"].tolist()]
+        old_flags = [bool(x) for x in df["need_split"].tolist()]
+        has_changes = new_flags != old_flags
+
+        if has_changes:
+            diff_count = sum(1 for a, b in zip(old_flags, new_flags) if a != b)
+            st.warning(f"⚠️ มีการติ๊กเปลี่ยน {diff_count} บิลที่ยังไม่ได้อัปเดต — PDF และสรุปด้านล่างยังเป็นค่าเดิม กดปุ่มนี้ก่อนดาวน์โหลด")
+
+        if st.button("🔄 อัปเดตตามติ๊กใหม่ (จัดเรียง + ปั๊มตราใหม่)", use_container_width=True):
+            if has_changes:
+                try:
+                    with st.spinner("⏳ กำลังจัดเรียงและประทับตราใหม่ตามติ๊ก..."):
+                        updated_pages = apply_manual_split(res["pages"], new_flags)
+                        pdf_bytes, final_pages = build_sorted_pdf(
+                            updated_pages,
+                            res["sort_mode"],
+                            st.session_state.file_store
+                        )
+
+                    st.session_state.result = {
+                        "pdf": pdf_bytes,
+                        "pages": final_pages,
+                        "sort_mode": res["sort_mode"]
+                    }
+                    st.session_state.editor_version += 1
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"❌ เกิดข้อผิดพลาด : {e}")
+            else:
+                st.info("ยังไม่มีการติ๊กเปลี่ยนแปลงครับ")
 
     st.markdown("---")
 
@@ -564,7 +556,7 @@ if st.session_state.result:
 
     st.download_button(
         label="📥 ดาวน์โหลด PDF ที่จัดเรียงแล้ว (มีตราปั๊ม)",
-        data=st.session_state.result["pdf"],
+        data=res["pdf"],
         file_name="sharp_sorted_bills_with_watermark.pdf",
         mime="application/pdf",
         use_container_width=True,
@@ -574,6 +566,8 @@ if st.session_state.result:
     # ================= SUMMARY =================
 
     st.subheader("📊 Picking Summary")
+
+    result_sort_mode = res["sort_mode"]
 
     if result_sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
         summary_df = df.groupby(["courier", "zone", "sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
@@ -659,7 +653,7 @@ col1, col2 = st.columns([3, 1])
 with col2:
     if st.button("🔄 เริ่มรอบใหม่", use_container_width=True):
         st.session_state.uploader_key += 1
-        st.session_state.pages_data = None
         st.session_state.file_store = []
         st.session_state.result = None
         st.rerun()
+
