@@ -19,6 +19,14 @@ st.set_page_config(
 # ================= SESSION STATE =================
 if "uploader_key" not in st.session_state:
     st.session_state.uploader_key = 0
+if "analyze_count" not in st.session_state:
+    st.session_state.analyze_count = 0          # ใช้รีเซ็ตตาราง editor เมื่ออ่านข้อมูลรอบใหม่
+if "pages_data" not in st.session_state:
+    st.session_state.pages_data = None          # ข้อมูลที่อ่านได้รายหน้า (จากขั้นตอนอ่านข้อมูล)
+if "file_store" not in st.session_state:
+    st.session_state.file_store = []            # bytes ของ PDF ต้นฉบับ (ไว้สร้างไฟล์ตอนกดจัดบิล)
+if "result" not in st.session_state:
+    st.session_state.result = None              # ผลลัพธ์หลังจัดบิล {"pdf", "df", "sort_mode"}
 
 # ================= CUSTOM CSS =================
 st.markdown("""
@@ -78,32 +86,33 @@ def load_bulky_skus_from_file(filename="bulky_skus.txt"):
 
 # ================= WATERMARK CREATOR =================
 
-def create_watermark_page(width=595, height=842):
+def create_watermark_reader(width=595, height=842):
+    """สร้างหน้าลายน้ำ EXTRA BOX -> คืนค่าเป็น PdfReader ทั้งตัว (กันโดน GC เก็บระหว่าง merge)"""
     packet = io.BytesIO()
     c = canvas.Canvas(packet, pagesize=(width, height))
-    
+
     c.saveState()
     stamp_w, stamp_h = 160, 42
     x_pos = width / 2
     y_pos = 50
-    
+
     c.translate(x_pos, y_pos)
     c.rotate(-5)
-    
+
     c.setStrokeColor(colors.HexColor("#DC2626"))
     c.setFillColor(colors.HexColor("#FEF2F2"))
     c.setLineWidth(2.5)
     c.roundRect(-stamp_w / 2, -stamp_h / 2, stamp_w, stamp_h, 8, stroke=1, fill=1)
-    
+
     c.setFont("Helvetica-Bold", 16)
     c.setFillColor(colors.HexColor("#DC2626"))
     c.drawCentredString(0, -5, "EXTRA BOX")
-        
+
     c.restoreState()
     c.save()
     packet.seek(0)
-    
-    return PdfReader(packet).pages[0]
+
+    return PdfReader(packet)
 
 
 # ================= EXTRACTION FUNCTIONS =================
@@ -158,12 +167,10 @@ def extract_zone(text):
 
 
 def extract_order_id(text):
-    pa_match = re.search(r'(PA[A-Z0-9]+)', text, re.IGNORECASE)
+    # เลขออเดอร์จริงเป็น PA + ตัวเลขล้วน (case-sensitive กันจับคำอย่าง "Campaign")
+    pa_match = re.search(r'\bPA\d{6,}\b', text)
     if pa_match:
-        result = pa_match.group(1)
-        if result.lower().endswith("order"):
-            result = result[:-5]
-        return result
+        return pa_match.group(0)
 
     match = re.search(
         r'Order\s*ID\s*:\s*([A-Z0-9\-]+)',
@@ -232,7 +239,6 @@ def extract_data_from_page(text, bulky_list):
     data = {
         "zone": "Unknown",
         "sku": "ZZZZZZ",
-        "all_skus": [],
         "qty": 1,
         "source": "Unknown",
         "track_no": "Unknown",
@@ -250,9 +256,8 @@ def extract_data_from_page(text, bulky_list):
     data["track_no"] = extract_track(text)
     data["courier"] = detect_courier(data["track_no"], data["source"])
     data["zone"] = extract_zone(text)
-    
+
     extracted_skus = extract_all_skus(text)
-    data["all_skus"] = extracted_skus
     data["sku"] = ", ".join(extracted_skus)
     data["order_id"] = extract_order_id(text)
 
@@ -260,7 +265,7 @@ def extract_data_from_page(text, bulky_list):
     total_qty = extract_grand_total_qty(text)
     data["qty"] = total_qty
 
-    # 2. DECISION LOGIC
+    # 2. DECISION LOGIC (อัตโนมัติ - เหมือนเดิมทุกอย่าง)
     if total_qty == 1:
         data["need_split"] = False
         data["boxes"] = 1
@@ -278,67 +283,92 @@ def extract_data_from_page(text, bulky_list):
     return data
 
 
-# ================= PDF PROCESS =================
+# ================= STEP A : อ่านข้อมูลทุกหน้า =================
 
-def process_multiple_pdfs(uploaded_files, sort_mode, bulky_list):
-    all_pages_data = []
-    writer = PdfWriter()
-    total_pages = 0
-    
-    pdf_streams = []
+def analyze_pdfs(uploaded_files, bulky_list):
+    file_store = []
     readers = []
+    total_pages = 0
 
-    for file_index, uploaded_file in enumerate(uploaded_files):
+    for uploaded_file in uploaded_files:
         file_bytes = uploaded_file.getvalue()
-        stream = io.BytesIO(file_bytes)
-        pdf_streams.append(stream)
-
-        reader = PdfReader(stream)
-        readers.append((file_index, reader))
+        file_store.append(file_bytes)
+        reader = PdfReader(io.BytesIO(file_bytes))
+        readers.append(reader)
         total_pages += len(reader.pages)
 
+    pages_data = []
     progress_bar = st.progress(0)
-    processed_pages = 0
+    processed = 0
 
-    for file_index, reader in readers:
-        for page in reader.pages:
+    for file_index, reader in enumerate(readers):
+        for page_index, page in enumerate(reader.pages):
             text = page.extract_text() or ""
             page_info = extract_data_from_page(text, bulky_list)
             page_info["file_index"] = file_index
-            page_info["reader_page_ref"] = page
+            page_info["page_index"] = page_index
+            pages_data.append(page_info)
 
-            all_pages_data.append(page_info)
-            processed_pages += 1
-            progress = processed_pages / total_pages
-            progress_bar.progress(progress)
+            processed += 1
+            progress_bar.progress(processed / total_pages)
 
-    normal_bills = [p for p in all_pages_data if not p["need_split"]]
-    split_bills = [p for p in all_pages_data if p["need_split"]]
+    progress_bar.empty()
+    return pages_data, file_store
+
+
+# ================= STEP B : รวมค่าติ๊กของผู้ใช้ =================
+
+def apply_manual_split(pages_data, manual_flags):
+    """เอาค่าติ๊กจากตาราง (ผู้ใช้แก้ได้) มาทับ need_split แล้วคำนวณกล่อง/สถานะใหม่"""
+    updated = []
+    for p, flag in zip(pages_data, manual_flags):
+        q = dict(p)
+        q["need_split"] = bool(flag)
+        if q["need_split"]:
+            q["boxes"] = max(int(q["qty"]), 1)
+            q["box_status"] = f"🚨 เพิ่มกล่อง ({q['boxes']} กล่อง)"
+        else:
+            q["boxes"] = 1
+            q["box_status"] = "✅ ปกติ (1 กล่อง)"
+        updated.append(q)
+    return updated
+
+
+# ================= STEP C : จัดเรียง + ปั๊มตรา + สร้าง PDF =================
+
+def build_sorted_pdf(pages_data, sort_mode, file_store):
+    # เปิด reader ใหม่จาก bytes ทุกครั้ง -> ไม่มีปัญหาปั๊มตราซ้ำเวลากดสร้างหลายรอบ
+    readers = [PdfReader(io.BytesIO(b)) for b in file_store]
+
+    normal_bills = [p for p in pages_data if not p["need_split"]]
+    split_bills = [p for p in pages_data if p["need_split"]]
 
     if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
-        normal_bills.sort(key=lambda x: (x["courier"], x["zone"], x["sku"]))
-        split_bills.sort(key=lambda x: (x["courier"], x["zone"], x["sku"]))
+        sort_key = lambda x: (x["courier"], x["zone"], x["sku"])
     elif sort_mode == "📦 เรียงตามโซน -> SKU":
-        normal_bills.sort(key=lambda x: (x["zone"], x["sku"]))
-        split_bills.sort(key=lambda x: (x["zone"], x["sku"]))
+        sort_key = lambda x: (x["zone"], x["sku"])
     else:
-        normal_bills.sort(key=lambda x: x["sku"])
-        split_bills.sort(key=lambda x: x["sku"])
+        sort_key = lambda x: (x["sku"],)
+
+    normal_bills.sort(key=sort_key)
+    split_bills.sort(key=sort_key)
 
     final_pages_data = normal_bills + split_bills
 
-    watermark_page = None
+    writer = PdfWriter()
+    wm_cache = {}  # (กว้าง, สูง) -> reader ลายน้ำ (รองรับหน้าไซซ์ต่างกันในไฟล์เดียว)
 
     for page_info in final_pages_data:
-        target_page = page_info["reader_page_ref"]
+        target_page = readers[page_info["file_index"]].pages[page_info["page_index"]]
 
         if page_info["need_split"]:
-            if watermark_page is None:
-                page_w = float(target_page.mediabox.width)
-                page_h = float(target_page.mediabox.height)
-                watermark_page = create_watermark_page(page_w, page_h)
-            
-            target_page.merge_page(watermark_page, expand=False)
+            page_w = float(target_page.mediabox.width)
+            page_h = float(target_page.mediabox.height)
+            key = (round(page_w), round(page_h))
+            if key not in wm_cache:
+                wm_cache[key] = create_watermark_reader(page_w, page_h)
+
+            target_page.merge_page(wm_cache[key].pages[0], expand=False)
 
         writer.add_page(target_page)
 
@@ -346,13 +376,13 @@ def process_multiple_pdfs(uploaded_files, sort_mode, bulky_list):
     writer.write(output_pdf)
     output_pdf.seek(0)
 
-    return output_pdf, final_pages_data
+    return output_pdf.getvalue(), final_pages_data
 
 
 # ================= HEADER =================
 
 st.title("📦 Sharp Bill Sorter")
-st.caption("ระบบจัดเรียงบิลอัจฉริยะ (เช็คยอดรวม -> ตรวจหา Bulky SKU -> แยกไว้ท้ายเล่ม + ปั๊มตรา EXTRA BOX)")
+st.caption("ระบบจัดเรียงบิลอัจฉริยะ (เช็คยอดรวม -> ตรวจหา Bulky SKU -> ติ๊กปรับเองได้ -> แยกไว้ท้ายเล่ม + ปั๊มตรา EXTRA BOX)")
 
 st.markdown("---")
 
@@ -392,9 +422,9 @@ sort_mode = st.radio(
 
 st.markdown("---")
 
-# ================= STEP 2: UPLOAD =================
+# ================= STEP 2: UPLOAD + อ่านข้อมูล =================
 
-st.subheader("📂 ขั้นตอนที่ 2 : อัปโหลด PDF")
+st.subheader("📂 ขั้นตอนที่ 2 : อัปโหลด PDF แล้วอ่านข้อมูล")
 
 uploaded_files = st.file_uploader(
     "ลากไฟล์ PDF มาวางตรงนี้",
@@ -403,157 +433,222 @@ uploaded_files = st.file_uploader(
     key=f"uploader_{st.session_state.uploader_key}"
 )
 
-# ================= PROCESS =================
-
 if uploaded_files:
-
     st.info(f"🗂️ พบไฟล์ทั้งหมด {len(uploaded_files)} ไฟล์")
 
-    if st.button(
-        "⚡ เริ่มจัดบิล",
-        type="primary",
-        use_container_width=True
-    ):
-
+    if st.button("🔍 อ่านข้อมูลบิลทั้งหมด", type="primary", use_container_width=True):
         try:
-            with st.spinner("⏳ กำลังประมวลผล คัดแยกออเดอร์ตามเงื่อนไข และประทับตราลายน้ำ..."):
-                sorted_pdf, details = process_multiple_pdfs(
-                    uploaded_files,
+            with st.spinner("⏳ กำลังอ่านข้อมูลจากทุกหน้า..."):
+                pages_data, file_store = analyze_pdfs(uploaded_files, bulky_list)
+
+            st.session_state.pages_data = pages_data
+            st.session_state.file_store = file_store
+            st.session_state.result = None
+            st.session_state.analyze_count += 1
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"❌ อ่านไฟล์ไม่สำเร็จ : {e}")
+
+# ================= STEP 3: ตารางติ๊กเอง =================
+
+if st.session_state.pages_data:
+
+    st.markdown("---")
+    st.subheader("✅ ขั้นตอนที่ 3 : ตรวจสอบ / ติ๊กปรับ 'เพิ่มกล่อง' เอง")
+    st.caption(
+        "ระบบติ๊กให้อัตโนมัติตามเงื่อนไขเดิม (ยอด > 1 และเป็น Bulky SKU) "
+        "— ติ๊กเพิ่มเพื่อบังคับปั๊มตรา EXTRA BOX + ย้ายไปท้ายเล่ม / เอาติ๊กออกเพื่อให้เป็นบิลปกติ"
+    )
+
+    src_df = pd.DataFrame(st.session_state.pages_data)
+
+    edit_df = pd.DataFrame({
+        "หน้าเดิม": range(1, len(src_df) + 1),
+        "Order ID": src_df["order_id"],
+        "Tracking": src_df["track_no"],
+        "ขนส่ง": src_df["courier"],
+        "โซน": src_df["zone"],
+        "SKU": src_df["sku"],
+        "จำนวน": src_df["qty"],
+        "🚨 เพิ่มกล่อง": src_df["need_split"].astype(bool),
+    })
+
+    edited_df = st.data_editor(
+        edit_df,
+        column_config={
+            "🚨 เพิ่มกล่อง": st.column_config.CheckboxColumn(
+                "🚨 เพิ่มกล่อง",
+                help="ติ๊ก = ปั๊มตรา EXTRA BOX และย้ายบิลนี้ไปท้ายเล่ม"
+            ),
+        },
+        disabled=["หน้าเดิม", "Order ID", "Tracking", "ขนส่ง", "โซน", "SKU", "จำนวน"],
+        hide_index=True,
+        use_container_width=True,
+        key=f"split_editor_{st.session_state.analyze_count}"
+    )
+
+    manual_flags = edited_df["🚨 เพิ่มกล่อง"].tolist()
+    ticked = int(sum(manual_flags))
+    st.info(f"🚨 ตอนนี้ติ๊ก 'เพิ่มกล่อง' ไว้ {ticked} บิล จากทั้งหมด {len(manual_flags)} บิล")
+
+    # ================= STEP 4: สร้าง PDF =================
+
+    if st.button("⚡ ขั้นตอนที่ 4 : จัดบิล + สร้าง PDF", type="primary", use_container_width=True):
+        try:
+            with st.spinner("⏳ กำลังจัดเรียง ประทับตรา และสร้างไฟล์..."):
+                updated_pages = apply_manual_split(st.session_state.pages_data, manual_flags)
+                pdf_bytes, final_pages = build_sorted_pdf(
+                    updated_pages,
                     sort_mode,
-                    bulky_list
+                    st.session_state.file_store
                 )
 
-            df = pd.DataFrame(details)
+            result_df = pd.DataFrame(final_pages)
+            st.session_state.result = {
+                "pdf": pdf_bytes,
+                "df": result_df,
+                "sort_mode": sort_mode
+            }
             st.success("🎉 จัดบิลสำเร็จเรียบร้อย!")
-
-            # ================= DEBUG PANEL =================
-            with st.expander("🛠️ DEBUG INFO: ตรวจสอบค่าที่อ่านได้จริงรายหน้า", expanded=False):
-                st.write("ตารางแสดงค่าจากบิลที่จัดเรียงแล้ว (เรียงจากบนลงล่างตามไฟล์ PDF ใหม่):")
-                debug_df = df.copy()
-                debug_df["หน้าใน PDF ใหม่"] = debug_df.index + 1
-                st.dataframe(
-                    debug_df[["หน้าใน PDF ใหม่", "order_id", "qty", "need_split", "boxes", "sku"]],
-                    use_container_width=True,
-                    hide_index=True
-                )
-
-            st.markdown("---")
-
-            # ================= METRICS =================
-
-            total_orders = len(df)
-            total_qty = df["qty"].sum()
-            total_boxes = df["boxes"].sum()
-            split_orders = len(df[df["need_split"] == True])
-
-            col1, col2, col3, col4 = st.columns(4)
-
-            with col1:
-                st.metric("📋 จำนวนออเดอร์", f"{total_orders} บิล")
-
-            with col2:
-                st.metric("📦 จำนวนสินค้ารวม", f"{total_qty} ชิ้น")
-
-            with col3:
-                st.metric("📫 รวมกล่องที่ต้องใช้", f"{total_boxes} กล่อง")
-
-            with col4:
-                st.metric("🚨 ออเดอร์ที่ต้องเพิ่มกล่อง", f"{split_orders} บิล (อยู่ท้ายสุด)")
-
-            st.markdown("---")
-
-            # ================= DOWNLOAD PDF =================
-
-            st.download_button(
-                label="📥 ดาวน์โหลด PDF ที่จัดเรียงแล้ว (มีตราปั๊ม)",
-                data=sorted_pdf,
-                file_name="sharp_sorted_bills_with_watermark.pdf",
-                mime="application/pdf",
-                use_container_width=True,
-                type="primary"
-            )
-
-            # ================= SUMMARY =================
-
-            st.subheader("📊 Picking Summary")
-
-            if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
-                summary_df = df.groupby(["courier", "zone", "sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
-                summary_df.columns = ["ขนส่ง", "โซน", "SKU", "จำนวนสินค้า", "จำนวนกล่อง"]
-                summary_df = summary_df.sort_values(by=["ขนส่ง", "โซน", "SKU"])
-            elif sort_mode == "📦 เรียงตามโซน -> SKU":
-                summary_df = df.groupby(["zone", "sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
-                summary_df.columns = ["โซน", "SKU", "จำนวนสินค้า", "จำนวนกล่อง"]
-                summary_df = summary_df.sort_values(by=["โซน", "SKU"])
-            else:
-                summary_df = df.groupby(["sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
-                summary_df.columns = ["SKU", "จำนวนสินค้า", "จำนวนกล่อง"]
-                summary_df = summary_df.sort_values(by=["SKU"])
-
-            csv_data = summary_df.to_csv(index=False).encode("utf-8-sig")
-
-            st.download_button(
-                label="📊 ดาวน์โหลด Picking List (CSV)",
-                data=csv_data,
-                file_name="picking_summary.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
-
-            st.dataframe(summary_df, use_container_width=True, hide_index=True)
-
-            st.markdown("---")
-
-            # ================= SEARCH =================
-
-            st.subheader("🔍 ค้นหาออเดอร์")
-
-            display_df = df.copy()
-            display_df["หน้าใหม่"] = display_df.index + 1
-
-            display_df = display_df[
-                [
-                    "หน้าใหม่",
-                    "track_no", 
-                    "courier",
-                    "zone",
-                    "sku",
-                    "qty",
-                    "boxes",
-                    "box_status",
-                    "order_id"
-                ]
-            ]
-
-            display_df.columns = [
-                "หน้า",
-                "Tracking",
-                "ขนส่ง",
-                "โซน",
-                "SKU",
-                "จำนวน",
-                "จำนวนกล่อง",
-                "สถานะแพ็ก",
-                "Order ID"
-            ]
-
-            search = st.text_input("ค้นหา SKU / Order ID / Tracking / ขนส่ง / สถานะแพ็ก")
-
-            if search:
-                filtered = display_df[
-                    display_df["SKU"].astype(str).str.contains(search, case=False, na=False)
-                    | display_df["Order ID"].astype(str).str.contains(search, case=False, na=False)
-                    | display_df["ขนส่ง"].astype(str).str.contains(search, case=False, na=False)
-                    | display_df["Tracking"].astype(str).str.contains(search, case=False, na=False)
-                    | display_df["สถานะแพ็ก"].astype(str).str.contains(search, case=False, na=False)
-                ]
-
-                st.dataframe(filtered, use_container_width=True, hide_index=True)
-            else:
-                st.dataframe(display_df, use_container_width=True, hide_index=True)
 
         except Exception as e:
             st.error(f"❌ เกิดข้อผิดพลาด : {e}")
+
+# ================= RESULT =================
+
+if st.session_state.result:
+
+    df = st.session_state.result["df"]
+    result_sort_mode = st.session_state.result["sort_mode"]
+
+    st.markdown("---")
+
+    # ================= DEBUG PANEL =================
+    with st.expander("🛠️ DEBUG INFO: ตรวจสอบค่าที่อ่านได้จริงรายหน้า", expanded=False):
+        st.write("ตารางแสดงค่าจากบิลที่จัดเรียงแล้ว (เรียงจากบนลงล่างตามไฟล์ PDF ใหม่):")
+        debug_df = df.copy()
+        debug_df["หน้าใน PDF ใหม่"] = debug_df.index + 1
+        st.dataframe(
+            debug_df[["หน้าใน PDF ใหม่", "order_id", "qty", "need_split", "boxes", "sku"]],
+            use_container_width=True,
+            hide_index=True
+        )
+
+    st.markdown("---")
+
+    # ================= METRICS =================
+
+    total_orders = len(df)
+    total_qty = int(df["qty"].sum())
+    total_boxes = int(df["boxes"].sum())
+    split_orders = int(df["need_split"].sum())
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("📋 จำนวนออเดอร์", f"{total_orders} บิล")
+
+    with col2:
+        st.metric("📦 จำนวนสินค้ารวม", f"{total_qty} ชิ้น")
+
+    with col3:
+        st.metric("📫 รวมกล่องที่ต้องใช้", f"{total_boxes} กล่อง")
+
+    with col4:
+        st.metric("🚨 ออเดอร์ที่ต้องเพิ่มกล่อง", f"{split_orders} บิล (อยู่ท้ายสุด)")
+
+    st.markdown("---")
+
+    # ================= DOWNLOAD PDF =================
+
+    st.download_button(
+        label="📥 ดาวน์โหลด PDF ที่จัดเรียงแล้ว (มีตราปั๊ม)",
+        data=st.session_state.result["pdf"],
+        file_name="sharp_sorted_bills_with_watermark.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+        type="primary"
+    )
+
+    # ================= SUMMARY =================
+
+    st.subheader("📊 Picking Summary")
+
+    if result_sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
+        summary_df = df.groupby(["courier", "zone", "sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
+        summary_df.columns = ["ขนส่ง", "โซน", "SKU", "จำนวนสินค้า", "จำนวนกล่อง"]
+        summary_df = summary_df.sort_values(by=["ขนส่ง", "โซน", "SKU"])
+    elif result_sort_mode == "📦 เรียงตามโซน -> SKU":
+        summary_df = df.groupby(["zone", "sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
+        summary_df.columns = ["โซน", "SKU", "จำนวนสินค้า", "จำนวนกล่อง"]
+        summary_df = summary_df.sort_values(by=["โซน", "SKU"])
+    else:
+        summary_df = df.groupby(["sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
+        summary_df.columns = ["SKU", "จำนวนสินค้า", "จำนวนกล่อง"]
+        summary_df = summary_df.sort_values(by=["SKU"])
+
+    csv_data = summary_df.to_csv(index=False).encode("utf-8-sig")
+
+    st.download_button(
+        label="📊 ดาวน์โหลด Picking List (CSV)",
+        data=csv_data,
+        file_name="picking_summary.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+    st.markdown("---")
+
+    # ================= SEARCH =================
+
+    st.subheader("🔍 ค้นหาออเดอร์")
+
+    display_df = df.copy()
+    display_df["หน้าใหม่"] = display_df.index + 1
+
+    display_df = display_df[
+        [
+            "หน้าใหม่",
+            "track_no",
+            "courier",
+            "zone",
+            "sku",
+            "qty",
+            "boxes",
+            "box_status",
+            "order_id"
+        ]
+    ]
+
+    display_df.columns = [
+        "หน้า",
+        "Tracking",
+        "ขนส่ง",
+        "โซน",
+        "SKU",
+        "จำนวน",
+        "จำนวนกล่อง",
+        "สถานะแพ็ก",
+        "Order ID"
+    ]
+
+    search = st.text_input("ค้นหา SKU / Order ID / Tracking / ขนส่ง / สถานะแพ็ก")
+
+    if search:
+        filtered = display_df[
+            display_df["SKU"].astype(str).str.contains(search, case=False, na=False, regex=False)
+            | display_df["Order ID"].astype(str).str.contains(search, case=False, na=False, regex=False)
+            | display_df["ขนส่ง"].astype(str).str.contains(search, case=False, na=False, regex=False)
+            | display_df["Tracking"].astype(str).str.contains(search, case=False, na=False, regex=False)
+            | display_df["สถานะแพ็ก"].astype(str).str.contains(search, case=False, na=False, regex=False)
+        ]
+
+        st.dataframe(filtered, use_container_width=True, hide_index=True)
+    else:
+        st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 # ================= RESET =================
 
@@ -564,5 +659,7 @@ col1, col2 = st.columns([3, 1])
 with col2:
     if st.button("🔄 เริ่มรอบใหม่", use_container_width=True):
         st.session_state.uploader_key += 1
+        st.session_state.pages_data = None
+        st.session_state.file_store = []
+        st.session_state.result = None
         st.rerun()
-
