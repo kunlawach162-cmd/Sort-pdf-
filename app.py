@@ -165,16 +165,15 @@ def extract_zone(text):
 
 
 def extract_order_id(text):
-    # เลขออเดอร์จริงเป็น PA + ตัวเลขล้วน (case-sensitive กันจับคำอย่าง "Campaign")
-    pa_match = re.search(r'\bPA\d{6,}\b', text)
+    # เลขออเดอร์ = PA + ตัวเลข (ห้ามใส่ \b เพราะบางไฟล์ extract ข้อความติดกัน เช่น "PA57854233Order")
+    # ยังคง case-sensitive เพื่อกันจับคำอย่าง "Campaign"
+    pa_match = re.search(r'PA\d{6,}', text)
     if pa_match:
         return pa_match.group(0)
 
-    match = re.search(
-        r'Order\s*ID\s*:\s*([A-Z0-9\-]+)',
-        text,
-        re.IGNORECASE
-    )
+    # fallback: เอาเฉพาะค่าที่อยู่ "บรรทัดเดียวกัน" กับ Order ID : และเป็นพิมพ์ใหญ่/ตัวเลขเท่านั้น
+    # (กันไม่ให้ regex วิ่งข้ามบรรทัดไปคว้าคำว่า Track จากบรรทัด Track No)
+    match = re.search(r'(?i:Order\s*ID)\s*:[ \t]*([A-Z0-9\-]{5,})', text)
     if match:
         return match.group(1).strip()
 
@@ -656,4 +655,3 @@ with col2:
         st.session_state.file_store = []
         st.session_state.result = None
         st.rerun()
-
