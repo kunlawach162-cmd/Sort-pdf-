@@ -83,6 +83,9 @@ WATER_CODES = {
 SIZE_RANK = {1500: 0, 1000: 1, 500: 2}
 UNKNOWN_SIZE_RANK = 99
 
+# คีย์พิเศษของช่องเลือก "ออเดอร์ผสมหลายขนาด" ในตัวกรอง
+MIXED_KEY = "__MIXED__"
+
 
 def size_rank(size):
     return SIZE_RANK.get(size, UNKNOWN_SIZE_RANK)
@@ -389,26 +392,44 @@ def sort_water_pages(pages_data):
     return normal_pages + mixed_pages
 
 
-def filter_pages_by_size(pages_data, selected_sizes):
+def split_mixed_orders(pages_data):
+    """แยกหน้าเป็น (ออเดอร์ขนาดเดียว, ออเดอร์หลายขนาด, เซ็ต order_base ที่ผสม)"""
+    mixed_bases = {
+        base for base, items in group_by_order(pages_data).items()
+        if len({i["size"] for i in items}) > 1
+    }
+    single_pages = [p for p in pages_data if p["order_base"] not in mixed_bases]
+    mixed_pages = [p for p in pages_data if p["order_base"] in mixed_bases]
+    return single_pages, mixed_pages, mixed_bases
+
+
+def mixed_order_detail(pages_data):
+    """สรุปว่าออเดอร์ผสมแต่ละตัวมีขนาดอะไรบ้าง กี่หน้า -> [(base, [ขนาด...], จำนวนหน้า)]"""
+    _, mixed_pages, _ = split_mixed_orders(pages_data)
+    detail = []
+    for base, items in group_by_order(mixed_pages).items():
+        sizes = sorted({i["size"] for i in items}, key=size_rank)
+        detail.append((base, sizes, len(items)))
+    return sorted(detail)
+
+
+def filter_water_pages(pages_data, selected_sizes, include_mixed):
     """
-    กรองแบบ "ตัดทั้งออเดอร์" : ออเดอร์จะออกมาก็ต่อเมื่อ *ทุกขนาด* ในออเดอร์นั้นถูกเลือกครบ
-    -> ออเดอร์ผสมจะไม่โดนฉีกไปคนละรอบปริ้นเด็ดขาด
-    คืน (หน้าที่เอา, ออเดอร์ที่ถูกตัดเพราะไม่ครบชุด)
+    ขนาดที่ติ๊ก  -> คุมเฉพาะ "ออเดอร์ขนาดเดียว"
+    ติ๊กออเดอร์ผสม -> ดึงออเดอร์ผสมมาทั้งชุดทุกใบ (ไม่โดนฉีกตามขนาดเด็ดขาด)
+    ลำดับหน้าเดิมถูกรักษาไว้ (บล็อกขนาด -> ออเดอร์ผสมท้ายเล่ม)
     """
+    _, _, mixed_bases = split_mixed_orders(pages_data)
     selected = set(selected_sizes)
-    keep_bases = set()
-    dropped_mixed = []
 
-    for base, items in group_by_order(pages_data).items():
-        sizes = {i["size"] for i in items}
-        if sizes <= selected:
-            keep_bases.add(base)
-        elif len(sizes) > 1 and sizes & selected:
-            # ออเดอร์ผสมที่มีขนาดที่เลือกอยู่ด้วย แต่เลือกไม่ครบ -> ตัดทิ้งทั้งออเดอร์
-            dropped_mixed.append((base, sorted(sizes, key=size_rank), len(items)))
-
-    kept = [p for p in pages_data if p["order_base"] in keep_bases]
-    return kept, sorted(dropped_mixed)
+    kept = []
+    for p in pages_data:
+        if p["order_base"] in mixed_bases:
+            if include_mixed:
+                kept.append(p)
+        elif p["size"] in selected:
+            kept.append(p)
+    return kept
 
 
 # ================= CORE STEPS =================
@@ -613,12 +634,11 @@ if st.session_state.result:
     st.success("🎉 จัดบิลเรียบร้อย! ตรวจสอบ/ติ๊กปรับได้ใน DEBUG INFO ด้านล่าง")
 
     if is_water:
-        mixed_bases = [b for b, items in group_by_order(res["pages"]).items()
-                       if len({i["size"] for i in items}) > 1]
-        mixed_pages = sum(1 for p in res["pages"] if p["order_base"] in mixed_bases)
-        if mixed_bases:
-            st.info(f"💧 พบออเดอร์ที่มีหลายขนาด {len(mixed_bases)} ออเดอร์ ({mixed_pages} หน้า) "
-                    f"— ย้ายไปไว้ท้ายเล่มให้แล้ว")
+        _, banner_mixed_pages, banner_mixed_bases = split_mixed_orders(res["pages"])
+        if banner_mixed_bases:
+            st.info(f"💧 พบออเดอร์ที่มีหลายขนาด {len(banner_mixed_bases)} ออเดอร์ "
+                    f"({len(banner_mixed_pages)} หน้า) — ย้ายไปไว้ท้ายเล่มให้แล้ว "
+                    f"และเลือกปริ้นแยกเป็นชุดได้ในตัวกรองด้านล่าง")
 
     # ================= DEBUG PANEL (ติ๊กได้) =================
     with st.expander("🛠️ DEBUG INFO: ตรวจสอบค่าที่อ่านได้จริงรายหน้า (ติ๊ก need_split ปรับเองได้)", expanded=False):
@@ -735,35 +755,51 @@ if st.session_state.result:
         st.subheader("💧 ปริ้นเฉพาะขนาดที่เลือก")
         st.caption("อัปโหลดครั้งเดียว แล้วสลับติ๊กขนาดเพื่อดาวน์โหลดแยกรอบได้เลย ไม่ต้องประมวลผลใหม่")
 
+        single_pages, mixed_pages, mixed_bases = split_mixed_orders(res["pages"])
+
+        # ขนาดที่ติ๊กนับเฉพาะ "ออเดอร์ขนาดเดียว" ส่วนออเดอร์ผสมมีช่องของตัวเองแยกต่างหาก
         size_counts = {}
-        for p in res["pages"]:
+        for p in single_pages:
             size_counts[p["size"]] = size_counts.get(p["size"], 0) + 1
 
         sizes_present = sorted(size_counts.keys(), key=size_rank)
-        label_to_size = {f"{size_label(s)} ({size_counts[s]} หน้า)": s for s in sizes_present}
-        options = list(label_to_size.keys())
+        label_to_key = {f"{size_label(s)} ({size_counts[s]} หน้า)": s for s in sizes_present}
+
+        if mixed_pages:
+            mixed_label = f"🔀 ออเดอร์ผสมหลายขนาด ({len(mixed_pages)} หน้า / {len(mixed_bases)} ออเดอร์)"
+            label_to_key[mixed_label] = MIXED_KEY
+
+        options = list(label_to_key.keys())
 
         picked_labels = st.multiselect(
-            "เลือกขนาดที่จะปริ้น",
+            "เลือกขนาด / กลุ่มที่จะปริ้น",
             options,
             default=options
         )
-        selected_sizes = [label_to_size[l] for l in picked_labels]
+        picked_keys = [label_to_key[l] for l in picked_labels]
+        selected_sizes = [k for k in picked_keys if k != MIXED_KEY]
+        include_mixed = MIXED_KEY in picked_keys
 
-        if not selected_sizes:
-            st.warning("⚠️ ยังไม่ได้เลือกขนาด")
+        if mixed_pages:
+            with st.expander(f"🔀 ดูรายละเอียดออเดอร์ผสม {len(mixed_bases)} ออเดอร์", expanded=False):
+                st.caption("ออเดอร์กลุ่มนี้จะออกมาครบทั้งชุดเสมอ ไม่โดนฉีกตามขนาด")
+                st.dataframe(
+                    pd.DataFrame([
+                        {
+                            "Order ID": base,
+                            "ขนาดที่มี": " + ".join(size_label(s) for s in sizes),
+                            "จำนวนหน้า": n
+                        }
+                        for base, sizes, n in mixed_order_detail(res["pages"])
+                    ]),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+        if not picked_keys:
+            st.warning("⚠️ ยังไม่ได้เลือกอะไรเลย")
         else:
-            kept_pages, dropped_mixed = filter_pages_by_size(res["pages"], selected_sizes)
-
-            if dropped_mixed:
-                lines = "\n".join(
-                    f"- `{base}` มี {' + '.join(size_label(s) for s in sizes)} ({n} หน้า)"
-                    for base, sizes, n in dropped_mixed
-                )
-                st.warning(
-                    f"⚠️ ตัดออก {len(dropped_mixed)} ออเดอร์ผสม เพราะเลือกขนาดไม่ครบชุด "
-                    f"(ต้องติ๊กขนาดที่มันมีให้ครบถึงจะออกมา)\n\n{lines}"
-                )
+            kept_pages = filter_water_pages(res["pages"], selected_sizes, include_mixed)
 
             if not kept_pages:
                 st.error("❌ ไม่มีบิลที่ตรงเงื่อนไข")
@@ -779,7 +815,10 @@ if st.session_state.result:
 
                 try:
                     filtered_pdf = render_pdf(kept_pages, st.session_state.file_store)
-                    tag = "-".join(str(s) if s else "unknown" for s in selected_sizes)
+                    parts = [str(s) if s else "unknown" for s in selected_sizes]
+                    if include_mixed:
+                        parts.append("mix")
+                    tag = "-".join(parts) if parts else "all"
                     st.download_button(
                         label=f"📥 ดาวน์โหลดเฉพาะขนาดที่เลือก ({len(kept_pages)} หน้า)",
                         data=filtered_pdf,
@@ -918,3 +957,4 @@ with col2:
         st.session_state.file_store = []
         st.session_state.result = None
         st.rerun()
+
