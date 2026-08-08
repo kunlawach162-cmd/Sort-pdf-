@@ -86,6 +86,9 @@ UNKNOWN_SIZE_RANK = 99
 # คีย์พิเศษของช่องเลือก "ออเดอร์ผสมหลายขนาด" ในตัวกรอง
 MIXED_KEY = "__MIXED__"
 
+# คีย์พิเศษของช่องเลือก "ออเดอร์เลขท้ายไม่ครบ" (ค่าเริ่มต้น = ไม่ติ๊ก = ยังไม่ทำ)
+INCOMPLETE_KEY = "__INCOMPLETE__"
+
 # ชื่อขนส่ง อ่านจากตัวอักษรนำหน้าเลขพัสดุ (บิลไม่มีชื่อขนส่งเขียนไว้)
 #   เพิ่ม prefix ใหม่ได้ที่นี่ที่เดียว เช่น "LEX": "Lazada Express 🚚"
 WATER_COURIER_MAP = {
@@ -429,37 +432,47 @@ def sort_water_pages(pages_data):
     ถัง A (ออเดอร์ขนาดเดียว) : แยกตามขนส่ง (prefix เลขพัสดุ) ก่อน -> ในแต่ละขนส่งเรียงบล็อก 1500 -> 1000 -> 500 -> ไม่ระบุ
                                 ในแต่ละบล็อกเรียง Order ID น้อย->มาก, ใบในออเดอร์เดียวกันเรียงเลขท้าย
     ถัง B (ออเดอร์หลายขนาด)  : ต่อท้ายเล่ม แยกตามขนส่ง -> เรียง Order ID -> ในออเดอร์เรียงขนาดใหญ่->เล็ก
+    ถัง C (เลขท้ายไม่ครบ)    : ท้ายสุดของเล่ม - แพ็กไม่ได้ ค่าเริ่มต้นคือไม่ปริ้น
     """
-    normal_pages = []
-    mixed_pages = []
-
-    for _, items in group_by_order(pages_data).items():
-        sizes = {i["size"] for i in items}
-        if len(sizes) > 1:
-            mixed_pages.extend(items)
-        else:
-            normal_pages.extend(items)
+    normal_pages, mixed_pages, incomplete_pages, _, _ = split_water_groups(pages_data)
 
     normal_pages.sort(key=lambda r: (r["water_courier"], size_rank(r["size"]), r["order_base"], r["order_seq"]))
     mixed_pages.sort(key=lambda r: (r["water_courier"], r["order_base"], size_rank(r["size"]), r["order_seq"]))
+    incomplete_pages.sort(key=lambda r: (r["water_courier"], r["order_base"], size_rank(r["size"]), r["order_seq"]))
 
-    return normal_pages + mixed_pages
+    return normal_pages + mixed_pages + incomplete_pages
 
 
-def split_mixed_orders(pages_data):
-    """แยกหน้าเป็น (ออเดอร์ขนาดเดียว, ออเดอร์หลายขนาด, เซ็ต order_base ที่ผสม)"""
+def split_water_groups(pages_data):
+    """
+    แยกหน้าเป็น 3 กลุ่ม (ออเดอร์เลขท้ายไม่ครบมาก่อนเสมอ - แพ็กไม่ได้อยู่ดี)
+      1. ออเดอร์ขนาดเดียว + เลขท้ายครบ
+      2. ออเดอร์หลายขนาด
+      3. ออเดอร์เลขท้ายไม่ครบ
+    คืน (normal, mixed, incomplete, mixed_bases, incomplete_bases)
+    """
+    incomplete_bases = {prob["base"] for prob in find_incomplete_orders(pages_data)}
+
     mixed_bases = {
         base for base, items in group_by_order(pages_data).items()
-        if len({i["size"] for i in items}) > 1
+        if base not in incomplete_bases and len({i["size"] for i in items}) > 1
     }
-    single_pages = [p for p in pages_data if p["order_base"] not in mixed_bases]
-    mixed_pages = [p for p in pages_data if p["order_base"] in mixed_bases]
-    return single_pages, mixed_pages, mixed_bases
+
+    normal, mixed, incomplete = [], [], []
+    for p in pages_data:
+        if p["order_base"] in incomplete_bases:
+            incomplete.append(p)
+        elif p["order_base"] in mixed_bases:
+            mixed.append(p)
+        else:
+            normal.append(p)
+
+    return normal, mixed, incomplete, mixed_bases, incomplete_bases
 
 
 def mixed_order_detail(pages_data):
     """สรุปว่าออเดอร์ผสมแต่ละตัวมีขนาดอะไรบ้าง กี่หน้า -> [(base, [ขนาด...], จำนวนหน้า)]"""
-    _, mixed_pages, _ = split_mixed_orders(pages_data)
+    _, mixed_pages, _, _, _ = split_water_groups(pages_data)
     detail = []
     for base, items in group_by_order(mixed_pages).items():
         sizes = sorted({i["size"] for i in items}, key=size_rank)
@@ -467,18 +480,67 @@ def mixed_order_detail(pages_data):
     return sorted(detail)
 
 
-def filter_water_pages(pages_data, selected_sizes, include_mixed):
+def find_incomplete_orders(pages_data):
     """
-    ขนาดที่ติ๊ก  -> คุมเฉพาะ "ออเดอร์ขนาดเดียว"
-    ติ๊กออเดอร์ผสม -> ดึงออเดอร์ผสมมาทั้งชุดทุกใบ (ไม่โดนฉีกตามขนาดเด็ดขาด)
-    ลำดับหน้าเดิมถูกรักษาไว้ (บล็อกขนาด -> ออเดอร์ผสมท้ายเล่ม)
+    หาออเดอร์ที่เลขท้าย PA ไม่ครบ เช่น มี -1 -2 -4 แต่ -3 หายไป
+    เช็ค 3 อย่าง : ขาดช่วง / เลขท้ายซ้ำ / ปนใบที่ไม่มีเลขท้ายเข้ามาในออเดอร์ที่มีเลขท้าย
+
+    ข้อจำกัดที่ต้องรู้ : บิลไม่ได้เขียนไว้ว่าออเดอร์นี้มีทั้งหมดกี่ใบ
+    เลยตรวจได้แค่ "ช่องว่างระหว่างเลขที่มีอยู่" ถ้าใบท้ายสุดหายไปเลย
+    (มี -1 -2 แต่จริงๆ ต้องมี -3) จะตรวจไม่เจอ
     """
-    _, _, mixed_bases = split_mixed_orders(pages_data)
+    problems = []
+
+    for base, items in group_by_order(pages_data).items():
+        seqs = sorted(i["order_seq"] for i in items)
+        uniq = sorted(set(seqs))
+
+        # ออเดอร์ใบเดียวที่ไม่มีเลขท้าย -> ปกติ
+        if uniq == [0]:
+            continue
+
+        notes = []
+        if 0 in uniq:
+            notes.append("มีใบที่ไม่มีเลขท้ายปนอยู่")
+            uniq = [s for s in uniq if s != 0]
+
+        dup = sorted({s for s in seqs if s != 0 and seqs.count(s) > 1})
+        if dup:
+            notes.append("เลขท้ายซ้ำ " + ", ".join(f"-{d}" for d in dup))
+
+        missing = []
+        if uniq:
+            have = set(uniq)
+            missing = [n for n in range(1, max(uniq) + 1) if n not in have]
+
+        if missing or notes:
+            problems.append({
+                "base": base,
+                "present": uniq,
+                "missing": missing,
+                "notes": " / ".join(notes),
+                "items": items,
+            })
+
+    return sorted(problems, key=lambda r: r["base"])
+
+
+def filter_water_pages(pages_data, selected_sizes, include_mixed, include_incomplete=False):
+    """
+    ขนาดที่ติ๊ก       -> คุมเฉพาะ "ออเดอร์ขนาดเดียวที่เลขท้ายครบ"
+    ติ๊กออเดอร์ผสม    -> ดึงออเดอร์ผสมมาทั้งชุดทุกใบ (ไม่โดนฉีกตามขนาดเด็ดขาด)
+    ติ๊กออเดอร์ไม่ครบ -> ดึงออเดอร์ที่เลขท้ายขาดมาด้วย (ค่าเริ่มต้นไม่ดึง = ยังไม่ทำ)
+    ลำดับหน้าเดิมถูกรักษาไว้เสมอ
+    """
+    _, _, _, mixed_bases, incomplete_bases = split_water_groups(pages_data)
     selected = set(selected_sizes)
 
     kept = []
     for p in pages_data:
-        if p["order_base"] in mixed_bases:
+        if p["order_base"] in incomplete_bases:
+            if include_incomplete:
+                kept.append(p)
+        elif p["order_base"] in mixed_bases:
             if include_mixed:
                 kept.append(p)
         elif p["size"] in selected:
@@ -688,6 +750,41 @@ if st.session_state.result:
     st.markdown("---")
     st.success("🎉 จัดบิลเรียบร้อย! ตรวจสอบ/ติ๊กปรับได้ใน DEBUG INFO ด้านล่าง")
 
+    # ================= เช็คเลขท้าย PA ครบไหม =================
+    incomplete_orders = find_incomplete_orders(res["pages"])
+    all_orders_count = len(group_by_order(res["pages"]))
+
+    if incomplete_orders:
+        st.error(f"🚨 พบ {len(incomplete_orders)} ออเดอร์ที่เลขท้าย PA ไม่ครบ — เช็คก่อนแพ็ก")
+
+        missing_rows = []
+        for prob in incomplete_orders:
+            first = prob["items"][0]
+            missing_rows.append({
+                "Order ID": prob["base"],
+                "ใบที่หาย": ", ".join(f"-{n}" for n in prob["missing"]) or "-",
+                "ใบที่มี": ", ".join(f"-{n}" for n in prob["present"]) or "-",
+                "จำนวนใบที่มี": len(prob["items"]),
+                "ขนส่ง": first.get("water_courier", "-"),
+                "หมายเหตุ": prob["notes"] or "-",
+            })
+
+        missing_df = pd.DataFrame(missing_rows)
+        st.dataframe(missing_df, use_container_width=True, hide_index=True)
+
+        st.download_button(
+            label="📥 ดาวน์โหลดรายการออเดอร์ที่ไม่ครบ (CSV)",
+            data=missing_df.to_csv(index=False).encode("utf-8-sig"),
+            file_name="incomplete_orders.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+        st.caption("⚠️ ตรวจจากช่องว่างระหว่างเลขท้ายที่มีอยู่เท่านั้น — บิลไม่ได้บอกว่าออเดอร์หนึ่งมีทั้งหมดกี่ใบ "
+                   "ถ้าใบท้ายสุดหายไปทั้งใบ (มี -1 -2 แต่จริงๆ ต้องมี -3) จะตรวจไม่เจอ")
+    else:
+        st.success(f"✅ เลขท้าย PA ครบทุกออเดอร์ ({all_orders_count} ออเดอร์)")
+
     if is_water:
         courier_counts = {}
         for p in res["pages"]:
@@ -695,7 +792,7 @@ if st.session_state.result:
         st.info("🚚 แยกขนส่งจากเลขพัสดุได้ " + " | ".join(
             f"{c} {n} หน้า" for c, n in sorted(courier_counts.items())))
 
-        _, banner_mixed_pages, banner_mixed_bases = split_mixed_orders(res["pages"])
+        _, banner_mixed_pages, _, banner_mixed_bases, _ = split_water_groups(res["pages"])
         if banner_mixed_bases:
             st.info(f"💧 พบออเดอร์ที่มีหลายขนาด {len(banner_mixed_bases)} ออเดอร์ "
                     f"({len(banner_mixed_pages)} หน้า) — ย้ายไปไว้ท้ายเล่มให้แล้ว "
@@ -814,12 +911,14 @@ if st.session_state.result:
 
     if is_water:
         st.markdown("---")
-        st.subheader("💧 ปริ้นเฉพาะขนาดที่เลือก")
-        st.caption("อัปโหลดครั้งเดียว แล้วสลับติ๊กขนาดเพื่อดาวน์โหลดแยกรอบได้เลย ไม่ต้องประมวลผลใหม่")
+        st.subheader("💧 เลือกกลุ่มที่จะปริ้น")
+        st.caption("อัปโหลดครั้งเดียว แล้วสลับติ๊กเพื่อดาวน์โหลดแยกรอบได้เลย ไม่ต้องประมวลผลใหม่ | ออเดอร์ที่เลขท้ายไม่ครบจะไม่ถูกติ๊กมาให้ตั้งแต่แรก")
 
-        single_pages, mixed_pages, mixed_bases = split_mixed_orders(res["pages"])
+        single_pages, mixed_pages, incomplete_pages, mixed_bases, incomplete_bases = \
+            split_water_groups(res["pages"])
 
-        # ขนาดที่ติ๊กนับเฉพาะ "ออเดอร์ขนาดเดียว" ส่วนออเดอร์ผสมมีช่องของตัวเองแยกต่างหาก
+        # ขนาดที่ติ๊กนับเฉพาะ "ออเดอร์ขนาดเดียวที่เลขท้ายครบ"
+        # ส่วนออเดอร์ผสม / ออเดอร์ไม่ครบ มีช่องของตัวเองแยกต่างหาก
         size_counts = {}
         for p in single_pages:
             size_counts[p["size"]] = size_counts.get(p["size"], 0) + 1
@@ -831,16 +930,34 @@ if st.session_state.result:
             mixed_label = f"🔀 ออเดอร์ผสมหลายขนาด ({len(mixed_pages)} หน้า / {len(mixed_bases)} ออเดอร์)"
             label_to_key[mixed_label] = MIXED_KEY
 
+        incomplete_label = None
+        if incomplete_pages:
+            incomplete_label = (f"⚠️ ออเดอร์เลขท้ายไม่ครบ "
+                                f"({len(incomplete_pages)} หน้า / {len(incomplete_bases)} ออเดอร์)")
+            label_to_key[incomplete_label] = INCOMPLETE_KEY
+
         options = list(label_to_key.keys())
+
+        # ออเดอร์ไม่ครบ = ไม่ติ๊กมาให้ตั้งแต่แรก (ยังไม่ทำ) ที่เหลือติ๊กครบ
+        default_labels = [l for l in options if l != incomplete_label]
 
         picked_labels = st.multiselect(
             "เลือกขนาด / กลุ่มที่จะปริ้น",
             options,
-            default=options
+            default=default_labels
         )
         picked_keys = [label_to_key[l] for l in picked_labels]
-        selected_sizes = [k for k in picked_keys if k != MIXED_KEY]
+        selected_sizes = [k for k in picked_keys if k not in (MIXED_KEY, INCOMPLETE_KEY)]
         include_mixed = MIXED_KEY in picked_keys
+        include_incomplete = INCOMPLETE_KEY in picked_keys
+
+        if incomplete_pages:
+            if include_incomplete:
+                st.warning(f"⚠️ กำลังรวมออเดอร์ที่เลขท้ายไม่ครบ {len(incomplete_bases)} ออเดอร์ "
+                           f"เข้าไปในไฟล์ด้วย (อยู่ท้ายสุดของเล่ม)")
+            else:
+                st.info(f"⏸️ กันออเดอร์ที่เลขท้ายไม่ครบไว้ {len(incomplete_bases)} ออเดอร์ "
+                        f"({len(incomplete_pages)} หน้า) — ยังไม่ทำ ไม่ถูกใส่ในไฟล์")
 
         if mixed_pages:
             with st.expander(f"🔀 ดูรายละเอียดออเดอร์ผสม {len(mixed_bases)} ออเดอร์", expanded=False):
@@ -861,7 +978,9 @@ if st.session_state.result:
         if not picked_keys:
             st.warning("⚠️ ยังไม่ได้เลือกอะไรเลย")
         else:
-            kept_pages = filter_water_pages(res["pages"], selected_sizes, include_mixed)
+            kept_pages = filter_water_pages(
+                res["pages"], selected_sizes, include_mixed, include_incomplete
+            )
 
             if not kept_pages:
                 st.error("❌ ไม่มีบิลที่ตรงเงื่อนไข")
@@ -880,6 +999,8 @@ if st.session_state.result:
                     parts = [str(s) if s else "unknown" for s in selected_sizes]
                     if include_mixed:
                         parts.append("mix")
+                    if include_incomplete:
+                        parts.append("incomplete")
                     tag = "-".join(parts) if parts else "all"
                     st.download_button(
                         label=f"📥 ดาวน์โหลดเฉพาะขนาดที่เลือก ({len(kept_pages)} หน้า)",
