@@ -70,7 +70,7 @@ div[data-testid="stFileUploader"] {
 
 # ================= WATER (น้ำแร่) CONFIG =================
 
-WATER_MODE = "💧 น้ำแร่ : ขนาด -> Order ID"
+WATER_MODE = "💧 น้ำแร่ : ขนส่ง -> ขนาด -> Order ID"
 
 # โค้ดสินค้าหลัก 3 ตัว -> ขนาดขวด (ml)
 WATER_CODES = {
@@ -85,6 +85,15 @@ UNKNOWN_SIZE_RANK = 99
 
 # คีย์พิเศษของช่องเลือก "ออเดอร์ผสมหลายขนาด" ในตัวกรอง
 MIXED_KEY = "__MIXED__"
+
+# ชื่อขนส่ง อ่านจากตัวอักษรนำหน้าเลขพัสดุ (บิลไม่มีชื่อขนส่งเขียนไว้)
+#   เพิ่ม prefix ใหม่ได้ที่นี่ที่เดียว เช่น "LEX": "Lazada Express 🚚"
+WATER_COURIER_MAP = {
+    "PX": "SCG Express 🚚",
+}
+
+# เลขพัสดุที่เป็นตัวเลขล้วน (ไม่มีตัวอักษรนำหน้า)
+NUMERIC_COURIER = "Nim Express 🚚"
 
 
 def size_rank(size):
@@ -228,6 +237,47 @@ def extract_order_parts(text):
     return full, base, int(seq) if seq.isdigit() else 0
 
 
+def extract_channel(text):
+    """
+    อ่านช่องทาง/ขนส่งจากบรรทัด Source by (บิลน้ำแร่ไม่มีชื่อบริษัทขนส่ง มีแต่ช่องทางนี้)
+    ตัดวันที่ที่ต่อท้ายมาในบรรทัดเดียวกันทิ้ง เช่น "Lazada 07/08/2026 09:08:48Download Date :"
+    """
+    if not text:
+        return "ไม่ระบุช่องทาง"
+
+    match = re.search(r'Source\s*by\s*:\s*(.+?)\s+\d{1,2}/\d{1,2}/\d{4}', text)
+    if match:
+        return match.group(1).strip()
+
+    match = re.search(r'Source\s*by\s*:\s*([A-Za-z][A-Za-z&.\- ]{1,29})', text)
+    if match:
+        return match.group(1).strip()
+
+    return "ไม่ระบุช่องทาง"
+
+
+def water_courier_key(track_no):
+    """
+    แยกขนส่งจากเลขพัสดุ (บิลน้ำแร่ไม่มีชื่อขนส่งเขียนไว้บนหน้ากระดาษ)
+      PX46380436     -> SCG Express
+      6212601492274  -> Nim Express (ตัวเลขล้วน)
+    prefix ใหม่ที่ยังไม่รู้จักจะแยกเป็นกลุ่มของตัวเองพร้อมโชว์ prefix ไว้ให้เห็น
+    """
+    t = (track_no or "").upper().strip()
+    if not t or t == "UNKNOWN":
+        return "ไม่ระบุขนส่ง"
+
+    prefix = re.match(r'[A-Z]+', t)
+    if prefix:
+        code = prefix.group(0)
+        return WATER_COURIER_MAP.get(code, f"ขนส่งอื่นๆ ({code}) 🚚")
+
+    if t.isdigit():
+        return NUMERIC_COURIER
+
+    return "ไม่ระบุขนส่ง"
+
+
 def extract_water_size(text):
     """อ่านขนาดขวดจากโค้ดสินค้าเป็นหลัก แล้วค่อย fallback ไปอ่านจากคำบรรยาย"""
     if not text:
@@ -314,6 +364,8 @@ def extract_data_from_page(text, bulky_list):
         "order_full": "Unknown",
         "order_base": "Unknown",
         "order_seq": 0,
+        "channel": "ไม่ระบุช่องทาง",
+        "water_courier": "ไม่ระบุขนส่ง",
         "size": None,
         "size_label": "ไม่ระบุขนาด",
         "boxes": 1,
@@ -335,6 +387,8 @@ def extract_data_from_page(text, bulky_list):
 
     # --- ข้อมูลเพิ่มสำหรับโหมดน้ำแร่ (ไม่กระทบโหมดเดิม) ---
     data["order_full"], data["order_base"], data["order_seq"] = extract_order_parts(text)
+    data["channel"] = extract_channel(text)
+    data["water_courier"] = water_courier_key(data["track_no"])
     data["size"] = extract_water_size(text)
     data["size_label"] = size_label(data["size"])
 
@@ -372,9 +426,9 @@ def group_by_order(pages_data):
 
 def sort_water_pages(pages_data):
     """
-    ถัง A (ออเดอร์ขนาดเดียว) : บล็อก 1500 -> 1000 -> 500 -> ไม่ระบุ
+    ถัง A (ออเดอร์ขนาดเดียว) : แยกตามขนส่ง (prefix เลขพัสดุ) ก่อน -> ในแต่ละขนส่งเรียงบล็อก 1500 -> 1000 -> 500 -> ไม่ระบุ
                                 ในแต่ละบล็อกเรียง Order ID น้อย->มาก, ใบในออเดอร์เดียวกันเรียงเลขท้าย
-    ถัง B (ออเดอร์หลายขนาด)  : ต่อท้ายเล่ม เรียง Order ID แล้วในออเดอร์เรียงขนาดใหญ่->เล็ก
+    ถัง B (ออเดอร์หลายขนาด)  : ต่อท้ายเล่ม แยกตามขนส่ง -> เรียง Order ID -> ในออเดอร์เรียงขนาดใหญ่->เล็ก
     """
     normal_pages = []
     mixed_pages = []
@@ -386,8 +440,8 @@ def sort_water_pages(pages_data):
         else:
             normal_pages.extend(items)
 
-    normal_pages.sort(key=lambda r: (size_rank(r["size"]), r["order_base"], r["order_seq"]))
-    mixed_pages.sort(key=lambda r: (r["order_base"], size_rank(r["size"]), r["order_seq"]))
+    normal_pages.sort(key=lambda r: (r["water_courier"], size_rank(r["size"]), r["order_base"], r["order_seq"]))
+    mixed_pages.sort(key=lambda r: (r["water_courier"], r["order_base"], size_rank(r["size"]), r["order_seq"]))
 
     return normal_pages + mixed_pages
 
@@ -578,8 +632,9 @@ sort_mode = st.radio(
 )
 
 if sort_mode == WATER_MODE:
-    st.caption("💧 โหมดน้ำแร่ : เรียง 1500 → 1000 → 500 ml (ในแต่ละขนาดเรียงตาม Order ID) "
-               "ส่วนออเดอร์ที่มีหลายขนาดจะถูกดันไปไว้ท้ายเล่มทั้งชุด และเลือกปริ้นเฉพาะขนาดได้ในหน้าผลลัพธ์")
+    st.caption("💧 โหมดน้ำแร่ : แยกตามขนส่ง (ดูจาก prefix เลขพัสดุ) ก่อน → ในแต่ละขนส่งเรียง 1500 → 1000 → 500 ml "
+               "→ ในแต่ละขนาดเรียงตาม Order ID | ออเดอร์ที่มีหลายขนาดถูกดันไปท้ายเล่มทั้งชุด "
+               "และเลือกปริ้นแยกขนาด/แยกกลุ่มได้ในหน้าผลลัพธ์")
 
 st.markdown("---")
 
@@ -634,6 +689,12 @@ if st.session_state.result:
     st.success("🎉 จัดบิลเรียบร้อย! ตรวจสอบ/ติ๊กปรับได้ใน DEBUG INFO ด้านล่าง")
 
     if is_water:
+        courier_counts = {}
+        for p in res["pages"]:
+            courier_counts[p["water_courier"]] = courier_counts.get(p["water_courier"], 0) + 1
+        st.info("🚚 แยกขนส่งจากเลขพัสดุได้ " + " | ".join(
+            f"{c} {n} หน้า" for c, n in sorted(courier_counts.items())))
+
         _, banner_mixed_pages, banner_mixed_bases = split_mixed_orders(res["pages"])
         if banner_mixed_bases:
             st.info(f"💧 พบออเดอร์ที่มีหลายขนาด {len(banner_mixed_bases)} ออเดอร์ "
@@ -648,13 +709,14 @@ if st.session_state.result:
         if is_water:
             debug_df = pd.DataFrame({
                 "หน้าใน PDF ใหม่": range(1, len(df) + 1),
+                "ขนส่ง": df["water_courier"],
                 "Order ID": df["order_full"],
                 "ขนาด": df["size_label"],
                 "qty": df["qty"],
                 "need_split": df["need_split"].astype(bool),
                 "boxes": df["boxes"],
             })
-            locked_cols = ["หน้าใน PDF ใหม่", "Order ID", "ขนาด", "qty", "boxes"]
+            locked_cols = ["หน้าใน PDF ใหม่", "ขนส่ง", "Order ID", "ขนาด", "qty", "boxes"]
         else:
             debug_df = pd.DataFrame({
                 "หน้าใน PDF ใหม่": range(1, len(df) + 1),
@@ -838,7 +900,7 @@ if st.session_state.result:
     result_sort_mode = res["sort_mode"]
 
     if result_sort_mode == WATER_MODE:
-        summary_df = df.groupby(["size_label"]).agg(
+        summary_df = df.groupby(["water_courier", "size_label"]).agg(
             bills=("order_full", "count"),
             orders=("order_base", "nunique"),
             boxes=("boxes", "sum")
@@ -846,8 +908,8 @@ if st.session_state.result:
         summary_df["_rank"] = summary_df["size_label"].map(
             lambda l: size_rank(int(l.replace(",", "").replace(" ml", "")) if "ml" in l else None)
         )
-        summary_df = summary_df.sort_values(by="_rank").drop(columns=["_rank"])
-        summary_df.columns = ["ขนาด", "จำนวนใบ (ลัง)", "จำนวนออเดอร์", "จำนวนกล่อง"]
+        summary_df = summary_df.sort_values(by=["water_courier", "_rank"]).drop(columns=["_rank"])
+        summary_df.columns = ["ขนส่ง", "ขนาด", "จำนวนใบ (ลัง)", "จำนวนออเดอร์", "จำนวนกล่อง"]
     elif result_sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
         summary_df = df.groupby(["courier", "zone", "sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
         summary_df.columns = ["ขนส่ง", "โซน", "SKU", "จำนวนสินค้า", "จำนวนกล่อง"]
@@ -886,25 +948,27 @@ if st.session_state.result:
         display_df = display_df[
             [
                 "หน้าใหม่",
+                "water_courier",
                 "order_full",
                 "size_label",
                 "track_no",
-                "source",
+                "channel",
                 "boxes",
                 "box_status"
             ]
         ]
         display_df.columns = [
             "หน้า",
+            "ขนส่ง",
             "Order ID",
             "ขนาด",
             "Tracking",
-            "แพลตฟอร์ม",
+            "ช่องทาง",
             "จำนวนกล่อง",
             "สถานะแพ็ก"
         ]
-        search_cols = ["Order ID", "ขนาด", "Tracking", "แพลตฟอร์ม", "สถานะแพ็ก"]
-        search_hint = "ค้นหา Order ID / ขนาด / Tracking / แพลตฟอร์ม"
+        search_cols = ["ขนส่ง", "Order ID", "ขนาด", "Tracking", "ช่องทาง", "สถานะแพ็ก"]
+        search_hint = "ค้นหา ขนส่ง / Order ID / ขนาด / Tracking / ช่องทาง"
     else:
         display_df = display_df[
             [
@@ -957,4 +1021,3 @@ with col2:
         st.session_state.file_store = []
         st.session_state.result = None
         st.rerun()
-
