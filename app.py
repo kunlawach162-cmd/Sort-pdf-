@@ -67,6 +67,31 @@ div[data-testid="stFileUploader"] {
 </style>
 """, unsafe_allow_html=True)
 
+
+# ================= WATER (น้ำแร่) CONFIG =================
+
+WATER_MODE = "💧 น้ำแร่ : ขนาด -> Order ID"
+
+# โค้ดสินค้าหลัก 3 ตัว -> ขนาดขวด (ml)
+WATER_CODES = {
+    "726281987631": 1500,
+    "726281987648": 1000,
+    "726281987655": 500,
+}
+
+# ลำดับการเรียงขนาด : ใหญ่ -> เล็ก -> ไม่ระบุ (99)
+SIZE_RANK = {1500: 0, 1000: 1, 500: 2}
+UNKNOWN_SIZE_RANK = 99
+
+
+def size_rank(size):
+    return SIZE_RANK.get(size, UNKNOWN_SIZE_RANK)
+
+
+def size_label(size):
+    return f"{size:,} ml" if size else "ไม่ระบุขนาด"
+
+
 # ================= BULKY SKU FILE LOADER =================
 
 def load_bulky_skus_from_file(filename="bulky_skus.txt"):
@@ -180,6 +205,48 @@ def extract_order_id(text):
     return "Unknown"
 
 
+def extract_order_parts(text):
+    """
+    แยก Order ID ออกเป็น 3 ส่วน (ใช้เฉพาะโหมดน้ำแร่ - ไม่แตะ extract_order_id เดิม)
+      order_full = PA58897909-1  (ไอดีเต็มรวมเลขท้าย)
+      order_base = PA58897909    (ออเดอร์จริง - ใช้จัดกลุ่ม)
+      order_seq  = 1             (เลขท้าย ไม่มี = 0 / เรียงเป็นตัวเลขไม่ใช่ตัวอักษร)
+    """
+    if not text:
+        return "Unknown", "Unknown", 0
+
+    match = re.search(r'PA\d{6,}(?:-\d+)?', text)
+    if not match:
+        fallback = extract_order_id(text)
+        return fallback, fallback, 0
+
+    full = match.group(0)
+    base, _, seq = full.partition("-")
+    return full, base, int(seq) if seq.isdigit() else 0
+
+
+def extract_water_size(text):
+    """อ่านขนาดขวดจากโค้ดสินค้าเป็นหลัก แล้วค่อย fallback ไปอ่านจากคำบรรยาย"""
+    if not text:
+        return None
+
+    # ลบช่องว่างทิ้งก่อน กันเคสที่ extract แล้วเลขโค้ดโดนหั่นเป็นช่วงๆ
+    compact = re.sub(r'\s+', '', text)
+    for code, size in WATER_CODES.items():
+        if code in compact:
+            return size
+
+    match = re.search(r'ขนาด\s*([\d,\.]+)\s*ml', text, re.IGNORECASE)
+    if match:
+        raw = match.group(1).replace(",", "")
+        try:
+            return int(float(raw))
+        except ValueError:
+            return None
+
+    return None
+
+
 def extract_all_skus(text):
     if not text:
         return ["ZZZZZZ"]
@@ -241,6 +308,11 @@ def extract_data_from_page(text, bulky_list):
         "track_no": "Unknown",
         "courier": "Unknown",
         "order_id": "Unknown",
+        "order_full": "Unknown",
+        "order_base": "Unknown",
+        "order_seq": 0,
+        "size": None,
+        "size_label": "ไม่ระบุขนาด",
         "boxes": 1,
         "need_split": False,
         "box_status": "ปกติ (1 กล่อง)"
@@ -257,6 +329,11 @@ def extract_data_from_page(text, bulky_list):
     extracted_skus = extract_all_skus(text)
     data["sku"] = ", ".join(extracted_skus)
     data["order_id"] = extract_order_id(text)
+
+    # --- ข้อมูลเพิ่มสำหรับโหมดน้ำแร่ (ไม่กระทบโหมดเดิม) ---
+    data["order_full"], data["order_base"], data["order_seq"] = extract_order_parts(text)
+    data["size"] = extract_water_size(text)
+    data["size_label"] = size_label(data["size"])
 
     # 1. อ่านยอดรวมทั้งสิ้น
     total_qty = extract_grand_total_qty(text)
@@ -278,6 +355,60 @@ def extract_data_from_page(text, bulky_list):
             data["box_status"] = "✅ ปกติ (1 กล่อง)"
 
     return data
+
+
+# ================= WATER MODE : GROUPING / SORTING / FILTER =================
+
+def group_by_order(pages_data):
+    """รวมหน้าเป็นกลุ่มตาม order_base (ออเดอร์จริง ไม่นับเลขท้าย -1 -2)"""
+    groups = {}
+    for p in pages_data:
+        groups.setdefault(p["order_base"], []).append(p)
+    return groups
+
+
+def sort_water_pages(pages_data):
+    """
+    ถัง A (ออเดอร์ขนาดเดียว) : บล็อก 1500 -> 1000 -> 500 -> ไม่ระบุ
+                                ในแต่ละบล็อกเรียง Order ID น้อย->มาก, ใบในออเดอร์เดียวกันเรียงเลขท้าย
+    ถัง B (ออเดอร์หลายขนาด)  : ต่อท้ายเล่ม เรียง Order ID แล้วในออเดอร์เรียงขนาดใหญ่->เล็ก
+    """
+    normal_pages = []
+    mixed_pages = []
+
+    for _, items in group_by_order(pages_data).items():
+        sizes = {i["size"] for i in items}
+        if len(sizes) > 1:
+            mixed_pages.extend(items)
+        else:
+            normal_pages.extend(items)
+
+    normal_pages.sort(key=lambda r: (size_rank(r["size"]), r["order_base"], r["order_seq"]))
+    mixed_pages.sort(key=lambda r: (r["order_base"], size_rank(r["size"]), r["order_seq"]))
+
+    return normal_pages + mixed_pages
+
+
+def filter_pages_by_size(pages_data, selected_sizes):
+    """
+    กรองแบบ "ตัดทั้งออเดอร์" : ออเดอร์จะออกมาก็ต่อเมื่อ *ทุกขนาด* ในออเดอร์นั้นถูกเลือกครบ
+    -> ออเดอร์ผสมจะไม่โดนฉีกไปคนละรอบปริ้นเด็ดขาด
+    คืน (หน้าที่เอา, ออเดอร์ที่ถูกตัดเพราะไม่ครบชุด)
+    """
+    selected = set(selected_sizes)
+    keep_bases = set()
+    dropped_mixed = []
+
+    for base, items in group_by_order(pages_data).items():
+        sizes = {i["size"] for i in items}
+        if sizes <= selected:
+            keep_bases.add(base)
+        elif len(sizes) > 1 and sizes & selected:
+            # ออเดอร์ผสมที่มีขนาดที่เลือกอยู่ด้วย แต่เลือกไม่ครบ -> ตัดทิ้งทั้งออเดอร์
+            dropped_mixed.append((base, sorted(sizes, key=size_rank), len(items)))
+
+    kept = [p for p in pages_data if p["order_base"] in keep_bases]
+    return kept, sorted(dropped_mixed)
 
 
 # ================= CORE STEPS =================
@@ -330,30 +461,15 @@ def apply_manual_split(pages_data, manual_flags):
     return updated
 
 
-def build_sorted_pdf(pages_data, sort_mode, file_store):
-    """จัดเรียง (ปกติก่อน, เพิ่มกล่องท้ายเล่ม) + ปั๊มตรา + สร้าง PDF"""
+def render_pdf(pages_data, file_store):
+    """สร้าง PDF ตามลำดับที่ส่งเข้ามา + ปั๊มตราเฉพาะหน้าที่ need_split"""
     # เปิด reader ใหม่จาก bytes ทุกครั้ง -> กดอัปเดตซ้ำกี่รอบตราก็ไม่ปั๊มซ้อน
     readers = [PdfReader(io.BytesIO(b)) for b in file_store]
-
-    normal_bills = [p for p in pages_data if not p["need_split"]]
-    split_bills = [p for p in pages_data if p["need_split"]]
-
-    if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
-        sort_key = lambda x: (x["courier"], x["zone"], x["sku"])
-    elif sort_mode == "📦 เรียงตามโซน -> SKU":
-        sort_key = lambda x: (x["zone"], x["sku"])
-    else:
-        sort_key = lambda x: (x["sku"],)
-
-    normal_bills.sort(key=sort_key)
-    split_bills.sort(key=sort_key)
-
-    final_pages_data = normal_bills + split_bills
 
     writer = PdfWriter()
     wm_cache = {}  # (กว้าง, สูง) -> reader ลายน้ำ (รองรับหน้าไซซ์ต่างกัน)
 
-    for page_info in final_pages_data:
+    for page_info in pages_data:
         target_page = readers[page_info["file_index"]].pages[page_info["page_index"]]
 
         if page_info["need_split"]:
@@ -371,7 +487,31 @@ def build_sorted_pdf(pages_data, sort_mode, file_store):
     writer.write(output_pdf)
     output_pdf.seek(0)
 
-    return output_pdf.getvalue(), final_pages_data
+    return output_pdf.getvalue()
+
+
+def build_sorted_pdf(pages_data, sort_mode, file_store):
+    """จัดเรียง (ปกติก่อน, เพิ่มกล่องท้ายเล่ม) + ปั๊มตรา + สร้าง PDF"""
+    normal_bills = [p for p in pages_data if not p["need_split"]]
+    split_bills = [p for p in pages_data if p["need_split"]]
+
+    if sort_mode == WATER_MODE:
+        normal_bills = sort_water_pages(normal_bills)
+        split_bills = sort_water_pages(split_bills)
+    else:
+        if sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
+            sort_key = lambda x: (x["courier"], x["zone"], x["sku"])
+        elif sort_mode == "📦 เรียงตามโซน -> SKU":
+            sort_key = lambda x: (x["zone"], x["sku"])
+        else:
+            sort_key = lambda x: (x["sku"],)
+
+        normal_bills.sort(key=sort_key)
+        split_bills.sort(key=sort_key)
+
+    final_pages_data = normal_bills + split_bills
+
+    return render_pdf(final_pages_data, file_store), final_pages_data
 
 
 # ================= HEADER =================
@@ -410,10 +550,15 @@ sort_mode = st.radio(
     [
         "🚚 เรียงตามขนส่ง -> SKU",
         "📦 เรียงตามโซน -> SKU",
-        "🔤 เรียงตาม SKU อย่างเดียว"
+        "🔤 เรียงตาม SKU อย่างเดียว",
+        WATER_MODE
     ],
     horizontal=True
 )
+
+if sort_mode == WATER_MODE:
+    st.caption("💧 โหมดน้ำแร่ : เรียง 1500 → 1000 → 500 ml (ในแต่ละขนาดเรียงตาม Order ID) "
+               "ส่วนออเดอร์ที่มีหลายขนาดจะถูกดันไปไว้ท้ายเล่มทั้งชุด และเลือกปริ้นเฉพาะขนาดได้ในหน้าผลลัพธ์")
 
 st.markdown("---")
 
@@ -462,23 +607,44 @@ if st.session_state.result:
 
     res = st.session_state.result
     df = pd.DataFrame(res["pages"])
+    is_water = res["sort_mode"] == WATER_MODE
 
     st.markdown("---")
     st.success("🎉 จัดบิลเรียบร้อย! ตรวจสอบ/ติ๊กปรับได้ใน DEBUG INFO ด้านล่าง")
+
+    if is_water:
+        mixed_bases = [b for b, items in group_by_order(res["pages"]).items()
+                       if len({i["size"] for i in items}) > 1]
+        mixed_pages = sum(1 for p in res["pages"] if p["order_base"] in mixed_bases)
+        if mixed_bases:
+            st.info(f"💧 พบออเดอร์ที่มีหลายขนาด {len(mixed_bases)} ออเดอร์ ({mixed_pages} หน้า) "
+                    f"— ย้ายไปไว้ท้ายเล่มให้แล้ว")
 
     # ================= DEBUG PANEL (ติ๊กได้) =================
     with st.expander("🛠️ DEBUG INFO: ตรวจสอบค่าที่อ่านได้จริงรายหน้า (ติ๊ก need_split ปรับเองได้)", expanded=False):
         st.write("ตารางแสดงค่าจากบิลที่จัดเรียงแล้ว (เรียงจากบนลงล่างตามไฟล์ PDF ใหม่):")
         st.caption("✏️ ติ๊ก/เอาติ๊กออกในช่อง need_split ได้เลย แล้วกดปุ่มอัปเดตด้านล่างตาราง — บิลที่ติ๊กจะโดนปั๊มตรา EXTRA BOX และย้ายไปท้ายเล่ม")
 
-        debug_df = pd.DataFrame({
-            "หน้าใน PDF ใหม่": range(1, len(df) + 1),
-            "order_id": df["order_id"],
-            "qty": df["qty"],
-            "need_split": df["need_split"].astype(bool),
-            "boxes": df["boxes"],
-            "sku": df["sku"],
-        })
+        if is_water:
+            debug_df = pd.DataFrame({
+                "หน้าใน PDF ใหม่": range(1, len(df) + 1),
+                "Order ID": df["order_full"],
+                "ขนาด": df["size_label"],
+                "qty": df["qty"],
+                "need_split": df["need_split"].astype(bool),
+                "boxes": df["boxes"],
+            })
+            locked_cols = ["หน้าใน PDF ใหม่", "Order ID", "ขนาด", "qty", "boxes"]
+        else:
+            debug_df = pd.DataFrame({
+                "หน้าใน PDF ใหม่": range(1, len(df) + 1),
+                "order_id": df["order_id"],
+                "qty": df["qty"],
+                "need_split": df["need_split"].astype(bool),
+                "boxes": df["boxes"],
+                "sku": df["sku"],
+            })
+            locked_cols = ["หน้าใน PDF ใหม่", "order_id", "qty", "boxes", "sku"]
 
         edited_df = st.data_editor(
             debug_df,
@@ -488,7 +654,7 @@ if st.session_state.result:
                     help="ติ๊ก = ปั๊มตรา EXTRA BOX + ย้ายไปท้ายเล่ม"
                 ),
             },
-            disabled=["หน้าใน PDF ใหม่", "order_id", "qty", "boxes", "sku"],
+            disabled=locked_cols,
             hide_index=True,
             use_container_width=True,
             key=f"debug_editor_{st.session_state.editor_version}"
@@ -562,13 +728,88 @@ if st.session_state.result:
         type="primary"
     )
 
+    # ================= WATER : SIZE FILTER =================
+
+    if is_water:
+        st.markdown("---")
+        st.subheader("💧 ปริ้นเฉพาะขนาดที่เลือก")
+        st.caption("อัปโหลดครั้งเดียว แล้วสลับติ๊กขนาดเพื่อดาวน์โหลดแยกรอบได้เลย ไม่ต้องประมวลผลใหม่")
+
+        size_counts = {}
+        for p in res["pages"]:
+            size_counts[p["size"]] = size_counts.get(p["size"], 0) + 1
+
+        sizes_present = sorted(size_counts.keys(), key=size_rank)
+        label_to_size = {f"{size_label(s)} ({size_counts[s]} หน้า)": s for s in sizes_present}
+        options = list(label_to_size.keys())
+
+        picked_labels = st.multiselect(
+            "เลือกขนาดที่จะปริ้น",
+            options,
+            default=options
+        )
+        selected_sizes = [label_to_size[l] for l in picked_labels]
+
+        if not selected_sizes:
+            st.warning("⚠️ ยังไม่ได้เลือกขนาด")
+        else:
+            kept_pages, dropped_mixed = filter_pages_by_size(res["pages"], selected_sizes)
+
+            if dropped_mixed:
+                lines = "\n".join(
+                    f"- `{base}` มี {' + '.join(size_label(s) for s in sizes)} ({n} หน้า)"
+                    for base, sizes, n in dropped_mixed
+                )
+                st.warning(
+                    f"⚠️ ตัดออก {len(dropped_mixed)} ออเดอร์ผสม เพราะเลือกขนาดไม่ครบชุด "
+                    f"(ต้องติ๊กขนาดที่มันมีให้ครบถึงจะออกมา)\n\n{lines}"
+                )
+
+            if not kept_pages:
+                st.error("❌ ไม่มีบิลที่ตรงเงื่อนไข")
+            else:
+                kept_df = pd.DataFrame(kept_pages)
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    st.metric("📄 จำนวนหน้าที่จะปริ้น", f"{len(kept_pages)} หน้า")
+                with c2:
+                    st.metric("📋 จำนวนออเดอร์", f"{kept_df['order_base'].nunique()} ออเดอร์")
+                with c3:
+                    st.metric("📫 รวมกล่อง", f"{int(kept_df['boxes'].sum())} กล่อง")
+
+                try:
+                    filtered_pdf = render_pdf(kept_pages, st.session_state.file_store)
+                    tag = "-".join(str(s) if s else "unknown" for s in selected_sizes)
+                    st.download_button(
+                        label=f"📥 ดาวน์โหลดเฉพาะขนาดที่เลือก ({len(kept_pages)} หน้า)",
+                        data=filtered_pdf,
+                        file_name=f"sharp_water_{tag}ml.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                        type="primary"
+                    )
+                except Exception as e:
+                    st.error(f"❌ สร้างไฟล์ที่กรองไม่สำเร็จ : {e}")
+
     # ================= SUMMARY =================
 
+    st.markdown("---")
     st.subheader("📊 Picking Summary")
 
     result_sort_mode = res["sort_mode"]
 
-    if result_sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
+    if result_sort_mode == WATER_MODE:
+        summary_df = df.groupby(["size_label"]).agg(
+            bills=("order_full", "count"),
+            orders=("order_base", "nunique"),
+            boxes=("boxes", "sum")
+        ).reset_index()
+        summary_df["_rank"] = summary_df["size_label"].map(
+            lambda l: size_rank(int(l.replace(",", "").replace(" ml", "")) if "ml" in l else None)
+        )
+        summary_df = summary_df.sort_values(by="_rank").drop(columns=["_rank"])
+        summary_df.columns = ["ขนาด", "จำนวนใบ (ลัง)", "จำนวนออเดอร์", "จำนวนกล่อง"]
+    elif result_sort_mode == "🚚 เรียงตามขนส่ง -> SKU":
         summary_df = df.groupby(["courier", "zone", "sku"]).agg(qty=("qty", "sum"), boxes=("boxes", "sum")).reset_index()
         summary_df.columns = ["ขนส่ง", "โซน", "SKU", "จำนวนสินค้า", "จำนวนกล่อง"]
         summary_df = summary_df.sort_values(by=["ขนส่ง", "โซน", "SKU"])
@@ -602,44 +843,66 @@ if st.session_state.result:
     display_df = df.copy()
     display_df["หน้าใหม่"] = display_df.index + 1
 
-    display_df = display_df[
-        [
-            "หน้าใหม่",
-            "track_no",
-            "courier",
-            "zone",
-            "sku",
-            "qty",
-            "boxes",
-            "box_status",
-            "order_id"
+    if is_water:
+        display_df = display_df[
+            [
+                "หน้าใหม่",
+                "order_full",
+                "size_label",
+                "track_no",
+                "source",
+                "boxes",
+                "box_status"
+            ]
         ]
-    ]
+        display_df.columns = [
+            "หน้า",
+            "Order ID",
+            "ขนาด",
+            "Tracking",
+            "แพลตฟอร์ม",
+            "จำนวนกล่อง",
+            "สถานะแพ็ก"
+        ]
+        search_cols = ["Order ID", "ขนาด", "Tracking", "แพลตฟอร์ม", "สถานะแพ็ก"]
+        search_hint = "ค้นหา Order ID / ขนาด / Tracking / แพลตฟอร์ม"
+    else:
+        display_df = display_df[
+            [
+                "หน้าใหม่",
+                "track_no",
+                "courier",
+                "zone",
+                "sku",
+                "qty",
+                "boxes",
+                "box_status",
+                "order_id"
+            ]
+        ]
+        display_df.columns = [
+            "หน้า",
+            "Tracking",
+            "ขนส่ง",
+            "โซน",
+            "SKU",
+            "จำนวน",
+            "จำนวนกล่อง",
+            "สถานะแพ็ก",
+            "Order ID"
+        ]
+        search_cols = ["SKU", "Order ID", "ขนส่ง", "Tracking", "สถานะแพ็ก"]
+        search_hint = "ค้นหา SKU / Order ID / Tracking / ขนส่ง / สถานะแพ็ก"
 
-    display_df.columns = [
-        "หน้า",
-        "Tracking",
-        "ขนส่ง",
-        "โซน",
-        "SKU",
-        "จำนวน",
-        "จำนวนกล่อง",
-        "สถานะแพ็ก",
-        "Order ID"
-    ]
-
-    search = st.text_input("ค้นหา SKU / Order ID / Tracking / ขนส่ง / สถานะแพ็ก")
+    search = st.text_input(search_hint)
 
     if search:
-        filtered = display_df[
-            display_df["SKU"].astype(str).str.contains(search, case=False, na=False, regex=False)
-            | display_df["Order ID"].astype(str).str.contains(search, case=False, na=False, regex=False)
-            | display_df["ขนส่ง"].astype(str).str.contains(search, case=False, na=False, regex=False)
-            | display_df["Tracking"].astype(str).str.contains(search, case=False, na=False, regex=False)
-            | display_df["สถานะแพ็ก"].astype(str).str.contains(search, case=False, na=False, regex=False)
-        ]
+        mask = False
+        for col in search_cols:
+            hit = display_df[col].astype(str).str.contains(search, case=False, na=False, regex=False)
+            mask = hit if mask is False else (mask | hit)
 
-        st.dataframe(filtered, use_container_width=True, hide_index=True)
+        st.dataframe(display_df[mask], use_container_width=True, hide_index=True)
     else:
         st.dataframe(display_df, use_container_width=True, hide_index=True)
 
