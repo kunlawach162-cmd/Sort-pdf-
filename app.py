@@ -29,36 +29,85 @@ if "result" not in st.session_state:
 # ================= CUSTOM CSS =================
 st.markdown("""
 <style>
+:root {
+    --brand: #0f766e;
+    --brand-dark: #115e59;
+    --ink: #172033;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --panel: #ffffff;
+    --canvas: #f4f7fb;
+}
 html, body, [data-testid="stAppViewContainer"] {
-    background-color: #faf9f6 !important;
-    color: #1e293b;
+    background: var(--canvas) !important;
+    color: var(--ink);
 }
-.block-container { padding-top: 1rem; }
-h1, h2, h3 { color: #111827; }
+[data-testid="stHeader"] { background: rgba(244,247,251,.92); }
+.block-container { max-width: 1500px; padding-top: 1.25rem; padding-bottom: 3rem; }
+h1, h2, h3 { color: var(--ink); letter-spacing: -0.025em; }
+h1 { font-size: clamp(1.8rem, 3vw, 2.55rem) !important; font-weight: 800 !important; }
+h2, h3 { font-weight: 750 !important; }
+[data-testid="stCaptionContainer"] { color: var(--muted); }
 div[data-testid="stMetric"] {
-    background-color: white;
-    padding: 18px;
-    border-radius: 14px;
-    border: 1px solid #e5e7eb;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    background: var(--panel); padding: 1.1rem 1.2rem; border-radius: 16px;
+    border: 1px solid var(--line); box-shadow: 0 4px 14px rgba(15,23,42,.035);
 }
-button[kind="primary"] {
-    background-color: #10b981 !important;
-    border-color: #10b981 !important;
-    color: white !important;
-    font-weight: bold !important;
-    border-radius: 10px !important;
-    height: 3rem;
+div[data-testid="stMetricLabel"] { color: #64748b; font-weight: 650; }
+div[data-testid="stMetricValue"] { color: #0f172a; font-weight: 800; }
+button[kind="primary"], [data-testid="stDownloadButton"] button[kind="primary"] {
+    background: var(--brand) !important; border: 1px solid var(--brand) !important;
+    color: white !important; font-weight: 750 !important; border-radius: 11px !important;
+    min-height: 2.9rem; transition: .15s ease;
 }
-button[kind="primary"]:hover {
-    background-color: #059669 !important;
-    border-color: #059669 !important;
-}
+button[kind="primary"]:hover { background: var(--brand-dark) !important; border-color: var(--brand-dark) !important; }
+button, [data-testid="stDownloadButton"] button { border-radius: 10px !important; }
 div[data-testid="stFileUploader"] {
-    background-color: white;
-    border: 2px dashed #d1d5db;
-    border-radius: 14px;
-    padding: 20px;
+    background: white; border: 2px dashed #b8c9d8; border-radius: 16px; padding: 1.2rem;
+}
+div[data-testid="stFileUploader"]:hover { border-color: var(--brand); }
+[data-testid="stExpander"] {
+    background: white; border: 1px solid var(--line); border-radius: 14px; overflow: hidden;
+}
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+}
+[data-testid="stAlert"] { border-radius: 12px; }
+hr { border-color: var(--line); }
+div[role="radiogroup"] { gap: .55rem; }
+div[role="radiogroup"] label {
+    background: white; border: 1px solid var(--line); border-radius: 11px;
+    padding: .65rem .8rem; min-height: 3rem;
+}
+div[role="radiogroup"] label:has(input:checked) {
+    border-color: var(--brand); background: #ecfdf5;
+}
+div[data-testid="stTextInput"] input, div[data-testid="stTextArea"] textarea {
+    border-radius: 10px;
+}
+.sharp-hero {
+    padding: 1.5rem 1.6rem; border-radius: 20px; margin-bottom: 1rem;
+    color: white; background: linear-gradient(120deg, #0f766e 0%, #115e59 55%, #164e63 100%);
+    box-shadow: 0 12px 28px rgba(15,118,110,.16);
+}
+.sharp-hero h1 { color: white !important; margin: 0 0 .35rem 0; }
+.sharp-hero p { color: #d9fffa; margin: 0; font-size: 1rem; }
+.sharp-kicker {
+    display: inline-block; font-size: .76rem; letter-spacing: .12em; text-transform: uppercase;
+    font-weight: 800; color: #ccfbf1; margin-bottom: .55rem;
+}
+.step-heading {
+    display: flex; align-items: center; gap: .7rem; margin: .25rem 0 .75rem 0;
+    font-size: 1.25rem; font-weight: 800; color: #172033;
+}
+.step-number {
+    display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem;
+    border-radius: 10px; background: #ccfbf1; color: #115e59; font-size: .95rem; font-weight: 850;
+}
+.small-note { color: #64748b; font-size: .9rem; }
+@media (max-width: 700px) {
+    .block-container { padding-left: 1rem; padding-right: 1rem; }
+    .sharp-hero { padding: 1.15rem; border-radius: 15px; }
+    div[data-testid="stMetric"] { padding: .8rem; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -495,9 +544,19 @@ def build_sorted_pdf(pages_data, sort_mode, file_store):
 
 
 # ================= HEADER =================
-st.title("📦 Sharp Bill Sorter")
-st.caption("ระบบจัดเรียงบิลอัจฉริยะ (เช็คยอดรวม -> ตรวจหา Bulky SKU -> แยกไว้ท้ายเล่ม + ปั๊มตรา EXTRA BOX | ติ๊กปรับเองได้ใน DEBUG INFO)")
-st.markdown("---")
+st.markdown("""
+<div class="sharp-hero">
+  <div class="sharp-kicker">Warehouse tools · PDF workflow</div>
+  <h1>📦 Sharp Bill Sorter</h1>
+  <p>จัดเรียงบิล • ตรวจสอบออเดอร์ • แยกกล่องพิเศษ • ดาวน์โหลด PDF พร้อมใช้งาน</p>
+</div>
+""", unsafe_allow_html=True)
+
+top_left, top_right = st.columns([3, 1])
+with top_left:
+    st.caption("เครื่องมือสำหรับจัดการบิลหลายไฟล์ในรอบเดียว พร้อมตารางตรวจสอบและ Picking Summary")
+with top_right:
+    st.markdown("<div style='text-align:right;padding-top:.35rem;color:#0f766e;font-weight:750'>● ระบบพร้อมใช้งาน</div>", unsafe_allow_html=True)
 
 # ================= BULKY SKU AUTO-LOAD =================
 default_bulky_skus, file_found = load_bulky_skus_from_file("bulky_skus.txt")
@@ -514,7 +573,7 @@ with st.expander("⚙️ ดู/แก้ไข รายการ Bulky SKU (�
 st.markdown("---")
 
 # ================= STEP 1: SORT MODE =================
-st.subheader("⚙️ ขั้นตอนที่ 1 : เลือกโหมดจัดเรียง")
+st.markdown('<div class="step-heading"><span class="step-number">1</span> เลือกโหมดจัดเรียง</div>', unsafe_allow_html=True)
 sort_mode = st.radio(
     "เลือกรูปแบบการจัดบิล",
     ["🚚 เรียงตามขนส่ง -> SKU", "📦 เรียงตามโซน -> SKU", "🔤 เรียงตาม SKU อย่างเดียว", WATER_MODE],
@@ -525,7 +584,7 @@ if sort_mode == WATER_MODE:
 st.markdown("---")
 
 # ================= STEP 2: UPLOAD =================
-st.subheader("📂 ขั้นตอนที่ 2 : อัปโหลด PDF")
+st.markdown('<div class="step-heading"><span class="step-number">2</span> อัปโหลดไฟล์ PDF</div>', unsafe_allow_html=True)
 uploaded_files = st.file_uploader(
     "ลากไฟล์ PDF มาวางตรงนี้",
     type=["pdf"],
@@ -554,7 +613,7 @@ if st.session_state.result:
     df = pd.DataFrame(res["pages"])
     is_water = res["sort_mode"] == WATER_MODE
     st.markdown("---")
-    st.success("🎉 จัดบิลเรียบร้อย! ตรวจสอบ/ติ๊กปรับได้ใน DEBUG INFO ด้านล่าง")
+    st.success("จัดบิลเรียบร้อยแล้ว — ตรวจสอบรายการด้านล่างก่อนดาวน์โหลดได้เลย")
 
     incomplete_orders = find_incomplete_orders(res["pages"])
     all_orders_count = len(group_by_order(res["pages"]))
@@ -666,7 +725,7 @@ if st.session_state.result:
     # ================= WATER FILTER =================
     if is_water:
         st.markdown("---")
-        st.subheader("💧 เลือกกลุ่มที่จะปริ้น")
+        st.markdown('<div class="step-heading"><span class="step-number">3</span> เลือกกลุ่มบิลที่จะพิมพ์</div>', unsafe_allow_html=True)
         st.caption("อัปโหลดครั้งเดียว แล้วสลับติ๊กเพื่อดาวน์โหลดแยกรอบได้ | ออเดอร์เลขท้ายไม่ครบจะไม่เลือกมาให้ตั้งแต่แรก")
         single_pages, mixed_pages, incomplete_pages, mixed_bases, incomplete_bases = split_water_groups(res["pages"])
         size_counts = {}
@@ -735,7 +794,7 @@ if st.session_state.result:
 
     # ================= SUMMARY =================
     st.markdown("---")
-    st.subheader("📊 Picking Summary")
+    st.markdown('<div class="step-heading"><span class="step-number">4</span> Picking Summary</div>', unsafe_allow_html=True)
     result_sort_mode = res["sort_mode"]
     if result_sort_mode == WATER_MODE:
         summary_df = df.groupby(["water_courier", "size_label"]).agg(
@@ -767,7 +826,7 @@ if st.session_state.result:
     st.markdown("---")
 
     # ================= SEARCH =================
-    st.subheader("🔍 ค้นหาออเดอร์")
+    st.markdown('<div class="step-heading"><span class="step-number">5</span> ค้นหาออเดอร์</div>', unsafe_allow_html=True)
     display_df = df.copy()
     display_df["หน้าใหม่"] = display_df.index + 1
     if is_water:
